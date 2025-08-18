@@ -1,5 +1,5 @@
 [project]
-name = "3xui-shopbo"
+name = "3xui-shopbot"
 version = "2.1.0"
 description = "Бот для автоматической продажи VLESS VPN"
 dependencies = [
