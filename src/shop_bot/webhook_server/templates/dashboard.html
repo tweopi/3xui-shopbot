@@ -1,0 +1,108 @@
+{% extends "base.html" %} {% block title %}Главная страница{% endblock %} {%
+block content %}
+
+<h1>Главная страница</h1>
+
+<section class="stats-section">
+	<div class="stats-grid">
+		<div class="stat-card">
+			<h3>Пользователей</h3>
+			<p class="stat-number">{{ stats.user_count }}</p>
+		</div>
+		<div class="stat-card">
+			<h3>Всего ключей</h3>
+			<p class="stat-number">{{ stats.total_keys }}</p>
+		</div>
+		<div class="stat-card">
+			<h3>Всего потрачено</h3>
+			<p class="stat-number">
+				{{ stats.total_spent | round(2) }} <small>RUB</small>
+			</p>
+		</div>
+		<div class="stat-card">
+			<h3>Активных хостов</h3>
+			<p class="stat-number">{{ stats.host_count }}</p>
+		</div>
+	</div>
+</section>
+
+<div class="dashboard-container">
+	<div class="dashboard-column-left">
+		<section>
+			<h2>Аналитика за последние 30 дней</h2>
+			<div class="chart-container">
+				<h3>Новые пользователи</h3>
+				<canvas id="newUsersChart"></canvas>
+			</div>
+			<div class="chart-container">
+				<h3>Новые ключи</h3>
+				<canvas id="newKeysChart"></canvas>
+			</div>
+		</section>
+	</div>
+
+	<div class="dashboard-column-right">
+		<section>
+			<h2>Недавние транзакции</h2>
+			{% if transactions %}
+			<div style="overflow-x: auto">
+				<table class="transactions-table">
+					<thead>
+						<tr>
+							<th>Пользователь</th>
+							<th>Хост</th>
+							<th>План</th>
+							<th>Цена</th>
+							<th>Дата</th>
+						</tr>
+					</thead>
+					<tbody>
+						{% for tx in transactions %}
+						<tr>
+							<td>
+								{{ tx.username or 'N/A' }}<br /><small>({{tx.user_id}})</small>
+							</td>
+							<td>{{ tx.host_name }}</td>
+							<td>{{ tx.plan_name }}</td>
+							<td>{{ tx.amount_rub | round(2) }} RUB</td>
+							<td>{{ tx.created_date.split(' ')[0] }}</td>
+						</tr>
+						{% endfor %}
+					</tbody>
+				</table>
+			</div>
+
+			{% if total_pages > 1 %}
+			<nav class="pagination">
+				<a
+					href="{{ url_for('dashboard_page', page=current_page - 1) }}"
+					class="{{ 'disabled' if current_page == 1 else '' }}"
+					>«</a
+				>
+
+				{% for p in range(1, total_pages + 1) %}
+				<a
+					href="{{ url_for('dashboard_page', page=p) }}"
+					class="{{ 'active' if p == current_page else '' }}"
+					>{{ p }}</a
+				>
+				{% endfor %}
+
+				<a
+					href="{{ url_for('dashboard_page', page=current_page + 1) }}"
+					class="{{ 'disabled' if current_page == total_pages else '' }}"
+					>»</a
+				>
+			</nav>
+			{% endif %} {% else %}
+			<p>Пока нет транзакций для отображения.</p>
+			{% endif %}
+		</section>
+	</div>
+</div>
+
+<script>
+	const CHART_DATA = {{ chart_data | tojson }};
+</script>
+
+{% endblock %}

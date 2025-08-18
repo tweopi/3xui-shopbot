@@ -1,0 +1,27 @@
+[project]
+name = "vles-shopbot"
+version = "2.1.0"
+description = "Бот для автоматической продажи VLESS VPN"
+dependencies = [
+    "aiogram==3.21.0",
+    "flask==3.1.1",
+    "py3xui==0.4.0",
+    "pyotp==2.9.0",
+    "python-dotenv==1.1.1",
+    "qrcode[pil]==8.2",
+    "yookassa==3.5.0",
+    "aiosend==2.1.2",
+    "aiohttp==3.9.5",
+    "aiohttp-sse-client==0.2.1",
+    "pytonconnect==0.3.2"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pip-tools",
+    "pylint",
+    "black"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

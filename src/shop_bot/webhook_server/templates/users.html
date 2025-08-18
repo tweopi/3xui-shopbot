@@ -1,0 +1,74 @@
+{% extends "base.html" %} {% block title %}Управление Пользователями{% endblock
+%} {% block content %}
+
+<h1>Управление Пользователями</h1>
+
+<section class="settings-section">
+	<h2>Список пользователей</h2>
+	<div style="overflow-x: auto">
+		<table class="users-table">
+			<thead>
+				<tr>
+					<th>Telegram ID</th>
+					<th>Username</th>
+					<th>Статус</th>
+					<th>Активные ключи</th>
+					<th class="actions-cell">Действия</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for user in users %}
+				<tr>
+					<td>{{ user.telegram_id }}</td>
+					<td>@{{ user.username or 'N/A' }}</td>
+					<td>
+						{% if user.is_banned %}
+						<span class="status-badge status-banned">Забанен</span>
+						{% else %}
+						<span class="status-badge status-active">Активен</span>
+						{% endif %}
+					</td>
+					<td>
+						{% if user.user_keys %} {{ user.user_keys | length }} шт. {% else %}
+						0 {% endif %}
+					</td>
+					<td class="actions-cell">
+						{% if user.is_banned %}
+						<form
+							action="{{ url_for('unban_user_route', user_id=user.telegram_id) }}"
+							method="post"
+						>
+							<button type="submit" class="button button-start button-small">
+								Разбанить
+							</button>
+						</form>
+						{% else %}
+						<form
+							action="{{ url_for('ban_user_route', user_id=user.telegram_id) }}"
+							method="post"
+							data-confirm="Вы уверены, что хотите забанить этого пользователя? Он не сможет пользоваться ботом."
+						>
+							<button type="submit" class="button button-warning button-small">
+								Бан
+							</button>
+						</form>
+						{% endif %} {% if user.user_keys %}
+						<form
+							action="{{ url_for('revoke_keys_route', user_id=user.telegram_id) }}"
+							method="post"
+							data-confirm="ВНИМАНИЕ! Это действие удалит ВСЕ ключи пользователя с серверов. Вы уверены?"
+						>
+							<button type="submit" class="button button-danger button-small">
+								Отозвать
+							</button>
+						</form>
+						{% endif %}
+					</td>
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+</section>
+
+{% endblock %}

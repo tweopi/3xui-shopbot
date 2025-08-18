@@ -1,0 +1,9 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    ports:
+      - '1488:1488'
+    volumes:
+      - .:/app/project
+      - /app/.venv

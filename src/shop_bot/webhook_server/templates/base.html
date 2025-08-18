@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>{% block title %}Панель управления Ботом{% endblock %}</title>
+		<link
+			rel="stylesheet"
+			href="{{ url_for('static', filename='css/style.css') }}"
+		/>
+		<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+	</head>
+	<body data-page="{{ request.endpoint }}">
+		<div class="container">
+			<header class="main-header">
+				<nav class="navigation">
+					<a
+						href="{{ url_for('dashboard_page') }}"
+						class="nav-link {% if request.endpoint == 'dashboard_page' %}active{% endif %}"
+						>Главная</a
+					>
+					<a
+						href="{{ url_for('users_page') }}"
+						class="nav-link {% if request.endpoint == 'users_page' %}active{% endif %}"
+						>Пользователи</a
+					>
+					<a
+						href="{{ url_for('support_list_page') }}"
+						class="nav-link {% if request.endpoint in ['support_list_page', 'support_ticket_page'] %}active{% endif %}"
+						>Поддержка</a>
+					<a
+						href="{{ url_for('settings_page') }}"
+						class="nav-link {% if request.endpoint == 'settings_page' %}active{% endif %}"
+						>Настройки</a>
+					<a
+                        href="{{ url_for('logout_page') }}"
+                        class="nav-link"
+                        style="display:none"
+                        >Hidden</a
+                    >
+				</nav>
+                <div class="bm">
+                    <input id="burger" type="checkbox" />
+                    <label for="burger" class="burger_img"></label>
+                    <nav class="burger-menu">
+                        <ul>
+                            <li><a href="{{ url_for('dashboard_page') }}">Главная</a></li>
+                            <li><a href="{{ url_for('users_page') }}">Пользователь</a></li>
+                            <li><a href="{{ url_for('support_list_page') }}">Поддержка</a></li>
+                            <li><a href="{{ url_for('settings_page') }}">Настройки</a></li>
+                        </ul>
+                    </nav>
+                </div>
+
+
+				<div class="header-controls">
+					<div class="bot-control">
+						{% if bot_status.is_running %}
+						<p class="status-running"><span class="indicator indicator--green pulse"></span>Статус: <strong>Запущен</strong></p>
+						<form action="{{ url_for('stop_bot_route') }}" method="post">
+							<button type="submit" class="button button-stop button-small">
+								Остановить
+							</button>
+						</form>
+						{% else %}
+						<p class="status-stopped"><span class="indicator indicator--gray"></span>Статус: <strong>Остановлен</strong></p>
+						{% if all_settings_ok and support_settings_ok %}
+						<form action="{{ url_for('start_both_bots_route') }}" method="post">
+							<button type="submit" class="button button-start button-small">
+								Запустить
+							</button>
+						</form>
+						{% else %}
+						<button class="button button-disabled button-small" disabled>
+							Запустить
+						</button>
+						{% endif %} {% endif %}
+					</div>
+
+					<div class="user-session-controls">
+						<span>Вы вошли в систему.</span>
+						<form
+							action="{{ url_for('logout_page') }}"
+							method="post"
+							style="display: inline"
+						>
+							<button type="submit" class="button button-logout">Выйти</button>
+						</form>
+					</div>
+				</div>
+			</header>
+
+			{% with messages = get_flashed_messages(with_categories=true) %} {% if
+			messages %} {% for category, message in messages %}
+			<div class="flash flash-{{ category }}">{{ message }}</div>
+			{% endfor %} {% endif %} {% endwith %}
+
+			<main>{% block content %}{% endblock %}</main>
+		</div>
+
+		<footer class="main-footer"></footer>
+		<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+	</body>
+</html>

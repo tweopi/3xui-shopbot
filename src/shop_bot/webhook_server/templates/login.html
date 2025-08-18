@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Вход в Панель управления</title>
+		<link
+			rel="stylesheet"
+			href="{{ url_for('static', filename='css/style.css') }}"
+		/>
+	</head>
+	<body class="login-page">
+		<div class="login-container">
+			<h1>Вход в панель</h1>
+
+			{% with messages = get_flashed_messages(with_categories=true) %} {% if
+			messages %} {% for category, message in messages %}
+			<div class="flash flash-{{ category }}">{{ message }}</div>
+			{% endfor %} {% endif %} {% endwith %}
+
+			<form method="post">
+				<div class="form-group">
+					<label for="username">Логин:</label>
+					<input type="text" id="username" name="username" required />
+				</div>
+				<div class="form-group">
+					<label for="password">Пароль:</label>
+					<input type="password" id="password" name="password" required />
+				</div>
+				<button type="submit" class="button button-primary" style="width: 100%">
+					Войти
+				</button>
+			</form>
+		</div>
+	</body>
+</html>
