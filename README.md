@@ -52,7 +52,7 @@
 **2. Выполните команду:**
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/tweopi/vless-shopbot/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/tweopi/3xui-shopbot/main/install.sh | sudo bash
 ```
 
 **Если вы обновляли бота, то иснтрукции ниже не появятся!**
