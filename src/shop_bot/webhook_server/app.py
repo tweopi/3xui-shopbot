@@ -410,6 +410,28 @@ def create_webhook_app(bot_controller_instance):
         flash(result['message'], 'success' if result['status'] == 'success' else 'danger')
         return redirect(request.referrer or url_for('dashboard_page'))
 
+    @flask_app.route('/stop-both-bots', methods=['POST'])
+    @login_required
+    def stop_both_bots_route():
+        # Stop main bot
+        main_result = _bot_controller.stop()
+        # Stop support bot
+        support_result = _support_bot_controller.stop()
+
+        # Build combined feedback
+        statuses = []
+        categories = []
+        for name, res in [('Основной бот', main_result), ('Support-бот', support_result)]:
+            if res.get('status') == 'success':
+                statuses.append(f"{name}: остановлен")
+                categories.append('success')
+            else:
+                statuses.append(f"{name}: ошибка — {res.get('message')}")
+                categories.append('danger')
+        category = 'danger' if 'danger' in categories else 'success'
+        flash(' | '.join(statuses), category)
+        return redirect(request.referrer or url_for('dashboard_page'))
+
     @flask_app.route('/start-both-bots', methods=['POST'])
     @login_required
     def start_both_bots_route():

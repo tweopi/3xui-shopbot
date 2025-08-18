@@ -57,7 +57,7 @@
 					<div class="bot-control">
 						{% if bot_status.is_running %}
 						<p class="status-running"><span class="indicator indicator--green pulse"></span>Статус: <strong>Запущен</strong></p>
-						<form action="{{ url_for('stop_bot_route') }}" method="post">
+						<form action="{{ url_for('stop_both_bots_route') }}" method="post">
 							<button type="submit" class="button button-stop button-small">
 								Остановить
 							</button>
