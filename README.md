@@ -6,10 +6,10 @@
     <a href="https://github.com/tweopi/vless-shopbot?tab=readme-ov-file#-%D0%B1%D0%B0%D0%B3%D0%B8-%D0%B8-%D0%BF%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F">Поддержать проект</a>
 </p>
 
-![GitHub License](https://img.shields.io/github/license/tweopi/vless-shopbot)
+![GitHub License](https://img.shields.io/github/license/tweopi/3xui-shopbot)
 ![GitHub Release](https://img.shields.io/badge/1.0.0%20-8A2BE2)
-![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/tweopi/vless-shopbot)
-![GitHub Stars](https://img.shields.io/github/stars/tweopi/vless-shopbot?style=flat)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/tweopi/3xui-shopbot)
+![GitHub Stars](https://img.shields.io/github/stars/tweopi/3xui-shopbot?style=flat)
 
 </div>
 
