@@ -263,8 +263,6 @@ def get_support_router() -> Router:
                 if t.get('subject'):
                     title += f" • {t['subject'][:20]}"
                 rows.append([types.InlineKeyboardButton(text=title, callback_data=f"support_view_{t['ticket_id']}")])
-        # add back button
-        rows.append([types.InlineKeyboardButton(text="⬅️ Назад", callback_data="start_over")])
         await callback.message.edit_text(text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=rows))
         # Restore ReplyKeyboard under input field for convenience
         try:
@@ -853,7 +851,6 @@ def get_support_router() -> Router:
                 if t.get('subject'):
                     title += f" • {t['subject'][:20]}"
                 rows.append([types.InlineKeyboardButton(text=title, callback_data=f"support_view_{t['ticket_id']}")])
-        rows.append([types.InlineKeyboardButton(text="⬅️ Назад", callback_data="start_over")])
         await message.answer(text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=rows))
 
     # Catch-all: relay any message from user to the open ticket's forum thread
