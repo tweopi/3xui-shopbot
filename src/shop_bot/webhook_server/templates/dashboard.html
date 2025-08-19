@@ -105,8 +105,11 @@ block content %}
 	</div>
 </div>
 
+<script id="chart-data" type="application/json">
+	{{ chart_data | tojson }}
+</script>
 <script>
-	const CHART_DATA = {{ chart_data | tojson }};
+	const CHART_DATA = JSON.parse(document.getElementById('chart-data').textContent);
 </script>
 
 {% endblock %}
