@@ -92,6 +92,7 @@ def initialize_db():
                     ticket_id INTEGER NOT NULL,
                     sender TEXT NOT NULL, -- 'user' | 'admin'
                     content TEXT NOT NULL,
+                    media TEXT, -- JSON with Telegram file_id(s), type, caption, mime, size, etc.
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (ticket_id) REFERENCES support_tickets (ticket_id)
                 )
@@ -217,6 +218,22 @@ def run_migration():
             logging.warning("Table 'support_tickets' not found, skipping its migration.")
 
         conn.commit()
+
+        # Migrate support_messages: add media column if missing
+        logging.info("The migration of the table 'support_messages' ...")
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='support_messages'")
+        table_exists = cursor.fetchone()
+        if table_exists:
+            cursor.execute("PRAGMA table_info(support_messages)")
+            sm_columns = [row[1] for row in cursor.fetchall()]
+            if 'media' not in sm_columns:
+                cursor.execute("ALTER TABLE support_messages ADD COLUMN media TEXT")
+                logging.info(" -> The column 'media' is successfully added to 'support_messages'.")
+            else:
+                logging.info(" -> The column 'media' already exists in 'support_messages'.")
+        else:
+            logging.warning("Table 'support_messages' not found, skipping its migration.")
         conn.close()
         
         logging.info("--- The database is successfully completed! ---")
@@ -381,6 +398,24 @@ def delete_plan(plan_id: int):
             logging.info(f"Deleted plan with id {plan_id}.")
     except sqlite3.Error as e:
         logging.error(f"Failed to delete plan with id {plan_id}: {e}")
+
+def update_plan(plan_id: int, plan_name: str, months: int, price: float) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE plans SET plan_name = ?, months = ?, price = ? WHERE plan_id = ?",
+                (plan_name, months, price, plan_id)
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                logging.warning(f"No plan updated for id {plan_id} (not found).")
+                return False
+            logging.info(f"Updated plan {plan_id}: name='{plan_name}', months={months}, price={price}.")
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update plan {plan_id}: {e}")
+        return False
 
 def register_user_if_not_exists(telegram_id: int, username: str, referrer_id):
     try:
@@ -932,6 +967,20 @@ def set_ticket_status(ticket_id: int, status: str) -> bool:
             return cursor.rowcount > 0
     except sqlite3.Error as e:
         logging.error(f"Failed to set status '{status}' for ticket {ticket_id}: {e}")
+        return False
+
+def update_ticket_subject(ticket_id: int, subject: str) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE support_tickets SET subject = ?, updated_at = CURRENT_TIMESTAMP WHERE ticket_id = ?",
+                (subject, ticket_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update subject for ticket {ticket_id}: {e}")
         return False
 
 def delete_ticket(ticket_id: int) -> bool:

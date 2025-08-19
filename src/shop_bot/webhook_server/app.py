@@ -4,6 +4,7 @@ import asyncio
 import json
 import hashlib
 import base64
+import time
 from hmac import compare_digest
 from datetime import datetime
 from functools import wraps
@@ -18,7 +19,7 @@ from shop_bot.bot import handlers
 from shop_bot.support_bot_controller import SupportBotController
 from shop_bot.data_manager.database import (
     get_all_settings, update_setting, get_all_hosts, get_plans_for_host,
-    create_host, delete_host, create_plan, delete_plan, get_user_count,
+    create_host, delete_host, create_plan, delete_plan, update_plan, get_user_count,
     get_total_keys_count, get_total_spent_sum, get_daily_stats_for_charts,
     get_recent_transactions, get_paginated_transactions, get_all_users, get_user_keys,
     ban_user, unban_user, delete_user_keys, get_setting, find_and_complete_ton_transaction,
@@ -389,10 +390,22 @@ def create_webhook_app(bot_controller_instance):
         flash(result['message'], 'success' if result['status'] == 'success' else 'danger')
         return redirect(request.referrer or url_for('settings_page'))
 
+    # Helper to wait until a controller stops (up to timeout seconds)
+    def _wait_for_stop(controller, timeout: float = 5.0) -> bool:
+        start = time.time()
+        while time.time() - start < timeout:
+            status = controller.get_status() or {}
+            if not status.get('is_running'):
+                return True
+            time.sleep(0.1)
+        return False
+
     @flask_app.route('/stop-support-bot', methods=['POST'])
     @login_required
     def stop_support_bot_route():
         result = _support_bot_controller.stop()
+        # Wait briefly to let polling stop so UI reflects correct state
+        _wait_for_stop(_support_bot_controller)
         flash(result['message'], 'success' if result['status'] == 'success' else 'danger')
         return redirect(request.referrer or url_for('settings_page'))
 
@@ -407,6 +420,8 @@ def create_webhook_app(bot_controller_instance):
     @login_required
     def stop_bot_route():
         result = _bot_controller.stop()
+        # Wait briefly to let polling stop so UI reflects correct state
+        _wait_for_stop(_bot_controller)
         flash(result['message'], 'success' if result['status'] == 'success' else 'danger')
         return redirect(request.referrer or url_for('dashboard_page'))
 
@@ -428,6 +443,9 @@ def create_webhook_app(bot_controller_instance):
             else:
                 statuses.append(f"{name}: ошибка — {res.get('message')}")
                 categories.append('danger')
+        # Wait briefly so subsequent render sees correct states
+        _wait_for_stop(_bot_controller)
+        _wait_for_stop(_support_bot_controller)
         category = 'danger' if 'danger' in categories else 'success'
         flash(' | '.join(statuses), category)
         return redirect(request.referrer or url_for('dashboard_page'))
@@ -529,6 +547,30 @@ def create_webhook_app(bot_controller_instance):
     def delete_plan_route(plan_id):
         delete_plan(plan_id)
         flash("Тариф успешно удален.", 'success')
+        return redirect(url_for('settings_page'))
+
+    @flask_app.route('/update-plan/<int:plan_id>', methods=['POST'])
+    @login_required
+    def update_plan_route(plan_id):
+        plan_name = (request.form.get('plan_name') or '').strip()
+        months = request.form.get('months')
+        price = request.form.get('price')
+        try:
+            months_int = int(months)
+            price_float = float(price)
+        except (TypeError, ValueError):
+            flash('Некорректные значения для месяцев или цены.', 'danger')
+            return redirect(url_for('settings_page'))
+
+        if not plan_name:
+            flash('Название тарифа не может быть пустым.', 'danger')
+            return redirect(url_for('settings_page'))
+
+        ok = update_plan(plan_id, plan_name, months_int, price_float)
+        if ok:
+            flash('Тариф обновлён.', 'success')
+        else:
+            flash('Не удалось обновить тариф (возможно, он не найден).', 'danger')
         return redirect(url_for('settings_page'))
 
     @flask_app.route('/yookassa-webhook', methods=['POST'])

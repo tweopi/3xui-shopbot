@@ -3,6 +3,19 @@
 
 <h1>Настройки</h1>
 
+<style>
+  /* Inline edit collapse animation */
+  .collapse { max-height: 0; overflow: hidden; opacity: 0; transition: max-height 220ms ease, opacity 220ms ease; }
+  .collapse.show { opacity: 1; }
+  .plan-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .plan-label { margin-right: 4px; min-width: 200px; }
+  .plan-edit form { display: inline-flex; gap: 6px; align-items: center; padding-top: 6px; }
+  .button-secondary { background: #f0f0f0; color: #333; border: 1px solid #ddd; }
+  .button-secondary:hover { background: #e9e9e9; }
+  .plan-edit-toggle[aria-expanded="true"] { transform: rotate(0deg); }
+  .plan-edit-toggle { transition: transform 180ms ease; }
+</style>
+
 <div class="settings-container">
 	<div class="settings-column-left">
 		<section class="settings-section">
@@ -73,17 +86,26 @@
 					<ul class="plan-list">
 						{% for plan in host.plans %}
 						<li>
-							<span>
-								{{ plan.plan_name }} - {{ plan.price|round(0) }} RUB
-							</span>
-							<form
-								action="{{ url_for('delete_plan_route', plan_id=plan.plan_id) }}"
-								method="post"
-							>
-								<button type="submit" class="button button-danger button-tiny">
-									×
-								</button>
-							</form>
+							<div class="plan-row">
+								<span class="plan-label">{{ plan.plan_name }} — {{ plan.months }} мес — {{ plan.price|round(0) }} RUB</span>
+								<button type="button" class="button button-secondary button-tiny plan-edit-toggle" data-target="#edit-{{ plan.plan_id }}">Редактировать</button>
+								<form
+									action="{{ url_for('delete_plan_route', plan_id=plan.plan_id) }}"
+									method="post"
+									style="display:inline-block;"
+									data-confirm="Удалить тариф '{{ plan.plan_name }}'?"
+								>
+									<button type="submit" class="button button-danger button-tiny" title="Удалить">×</button>
+								</form>
+							</div>
+							<div id="edit-{{ plan.plan_id }}" class="plan-edit collapse">
+								<form action="{{ url_for('update_plan_route', plan_id=plan.plan_id) }}" method="post" class="form-inline">
+									<input type="text" name="plan_name" value="{{ plan.plan_name }}" placeholder="Название" required style="min-width:140px;" />
+									<input type="number" name="months" value="{{ plan.months }}" placeholder="Мес." required style="width:80px;" />
+									<input type="number" step="0.01" name="price" value="{{ plan.price }}" placeholder="Цена" required style="width:110px;" />
+									<button type="submit" class="button button-primary button-tiny">Сохранить</button>
+								</form>
+							</div>
 						</li>
 						{% endfor %}
 					</ul>
@@ -465,5 +487,49 @@
 		</form>
 	</div>
 </div>
+
+<script>
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.plan-edit-toggle');
+    if (!btn) return;
+    const targetSel = btn.getAttribute('data-target');
+    if (!targetSel) return;
+    const panel = document.querySelector(targetSel);
+    if (!panel) return;
+
+    const hostSection = btn.closest('.plans-section');
+    if (hostSection) {
+      // Close other open panels in this host section
+      hostSection.querySelectorAll('.plan-edit.collapse.show').forEach(other => {
+        if (other !== panel) {
+          const otherBtn = hostSection.querySelector(`.plan-edit-toggle[data-target="#${other.id}"]`);
+          if (otherBtn) otherBtn.setAttribute('aria-expanded', 'false');
+          other.style.maxHeight = other.scrollHeight + 'px';
+          requestAnimationFrame(() => {
+            other.style.maxHeight = '0px';
+            setTimeout(() => { other.classList.remove('show'); }, 220);
+          });
+        }
+      });
+    }
+
+    const isOpen = panel.classList.contains('show');
+    if (!isOpen) {
+      // Open with auto-height
+      panel.classList.add('show');
+      panel.style.maxHeight = panel.scrollHeight + 'px';
+      setTimeout(() => { panel.style.maxHeight = 'none'; }, 230);
+      btn.setAttribute('aria-expanded', 'true');
+    } else {
+      // Close with height animation
+      panel.style.maxHeight = panel.scrollHeight + 'px';
+      requestAnimationFrame(() => {
+        panel.style.maxHeight = '0px';
+        setTimeout(() => { panel.classList.remove('show'); }, 220);
+      });
+      btn.setAttribute('aria-expanded', 'false');
+    }
+  });
+</script>
 
 {% endblock %}
