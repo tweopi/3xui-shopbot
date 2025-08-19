@@ -1037,3 +1037,23 @@ def get_open_tickets_count() -> int:
     except sqlite3.Error as e:
         logging.error("Failed to get open tickets count: %s", e)
         return 0
+
+def get_closed_tickets_count() -> int:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM support_tickets WHERE status = 'closed'")
+            return cursor.fetchone()[0] or 0
+    except sqlite3.Error as e:
+        logging.error("Failed to get closed tickets count: %s", e)
+        return 0
+
+def get_all_tickets_count() -> int:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM support_tickets")
+            return cursor.fetchone()[0] or 0
+    except sqlite3.Error as e:
+        logging.error("Failed to get all tickets count: %s", e)
+        return 0

@@ -7,9 +7,9 @@
 
   <div class="controls-row">
     <div class="filters">
-      <a class="button {% if not filter_status %}button-primary{% endif %}" href="{{ url_for('support_list_page') }}">Все</a>
+      <a class="button {% if not filter_status %}button-primary{% endif %}" href="{{ url_for('support_list_page') }}">Все ({{ all_count }})</a>
       <a class="button {% if filter_status == 'open' %}button-primary{% endif %}" href="{{ url_for('support_list_page', status='open') }}">Открытые ({{ open_count }})</a>
-      <a class="button {% if filter_status == 'closed' %}button-primary{% endif %}" href="{{ url_for('support_list_page', status='closed') }}">Закрытые</a>
+      <a class="button {% if filter_status == 'closed' %}button-primary{% endif %}" href="{{ url_for('support_list_page', status='closed') }}">Закрытые ({{ closed_count }})</a>
     </div>
   </div>
 

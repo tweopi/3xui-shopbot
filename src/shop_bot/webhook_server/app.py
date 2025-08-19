@@ -24,7 +24,8 @@ from shop_bot.data_manager.database import (
     get_recent_transactions, get_paginated_transactions, get_all_users, get_user_keys,
     ban_user, unban_user, delete_user_keys, get_setting, find_and_complete_ton_transaction,
     get_tickets_paginated, get_open_tickets_count, get_ticket, get_ticket_messages,
-    add_support_message, set_ticket_status, delete_ticket
+    add_support_message, set_ticket_status, delete_ticket,
+    get_closed_tickets_count, get_all_tickets_count
 )
 
 _bot_controller = None
@@ -109,11 +110,23 @@ def create_webhook_app(bot_controller_instance):
         required_support_for_start = ['support_bot_token', 'support_bot_username', 'admin_telegram_id']
         all_settings_ok = all(settings.get(key) for key in required_for_start)
         support_settings_ok = all(settings.get(key) for key in required_support_for_start)
+        # Ticket counters for header badges
+        try:
+            open_tickets_count = get_open_tickets_count()
+            closed_tickets_count = get_closed_tickets_count()
+            all_tickets_count = get_all_tickets_count()
+        except Exception:
+            open_tickets_count = 0
+            closed_tickets_count = 0
+            all_tickets_count = 0
         return {
             "bot_status": bot_status,
             "all_settings_ok": all_settings_ok,
             "support_bot_status": support_bot_status,
             "support_settings_ok": support_settings_ok,
+            "open_tickets_count": open_tickets_count,
+            "closed_tickets_count": closed_tickets_count,
+            "all_tickets_count": all_tickets_count,
         }
 
     @flask_app.route('/')
@@ -169,6 +182,8 @@ def create_webhook_app(bot_controller_instance):
         tickets, total = get_tickets_paginated(page=page, per_page=per_page, status=status if status in ['open', 'closed'] else None)
         total_pages = ceil(total / per_page) if per_page else 1
         open_count = get_open_tickets_count()
+        closed_count = get_closed_tickets_count()
+        all_count = get_all_tickets_count()
         common_data = get_common_template_data()
         return render_template(
             'support.html',
@@ -177,6 +192,8 @@ def create_webhook_app(bot_controller_instance):
             total_pages=total_pages,
             filter_status=status,
             open_count=open_count,
+            closed_count=closed_count,
+            all_count=all_count,
             **common_data
         )
 

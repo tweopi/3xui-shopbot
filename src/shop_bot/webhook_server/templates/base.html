@@ -27,7 +27,14 @@
 					<a
 						href="{{ url_for('support_list_page') }}"
 						class="nav-link {% if request.endpoint in ['support_list_page', 'support_ticket_page'] %}active{% endif %}"
-						>Поддержка</a>
+					>
+						Поддержка
+						{% if open_tickets_count and open_tickets_count > 0 %}
+						<span class="badge badge-green" title="Открытые тикеты">
+							<span class="indicator indicator--green pulse"></span>{{ open_tickets_count }}
+						</span>
+						{% endif %}
+					</a>
 					<a
 						href="{{ url_for('settings_page') }}"
 						class="nav-link {% if request.endpoint == 'settings_page' %}active{% endif %}"
