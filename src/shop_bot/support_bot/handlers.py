@@ -264,11 +264,6 @@ def get_support_router() -> Router:
                     title += f" • {t['subject'][:20]}"
                 rows.append([types.InlineKeyboardButton(text=title, callback_data=f"support_view_{t['ticket_id']}")])
         await callback.message.edit_text(text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=rows))
-        # Restore ReplyKeyboard under input field for convenience
-        try:
-            await callback.message.answer("Меню поддержки:", reply_markup=_user_main_reply_kb())
-        except Exception:
-            pass
 
     @router.callback_query(F.data.startswith("support_view_"))
     async def support_view_ticket_handler(callback: types.CallbackQuery):
