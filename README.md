@@ -7,7 +7,7 @@
 </p>
 
 ![GitHub License](https://img.shields.io/github/license/tweopi/3xui-shopbot)
-![GitHub Release](https://img.shields.io/badge/1.0.0%20-8A2BE2)
+![GitHub Release](https://img.shields.io/badge/1.0.1%20-8A2BE2)
 ![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/tweopi/3xui-shopbot)
 ![GitHub Stars](https://img.shields.io/github/stars/tweopi/3xui-shopbot?style=flat)
 
