@@ -274,6 +274,16 @@ def create_new_transactions_table(cursor: sqlite3.Cursor):
 
 def create_host(name: str, url: str, user: str, passwd: str, inbound: int, subscription_url: str | None = None):
     try:
+        name = (name or "").strip()
+        url = (url or "").strip()
+        user = (user or "").strip()
+        passwd = passwd or ""
+        try:
+            inbound = int(inbound)
+        except Exception:
+            pass
+        subscription_url = (subscription_url or None)
+
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             try:
@@ -295,12 +305,13 @@ def update_host_subscription_url(host_name: str, subscription_url: str | None) -
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM xui_hosts WHERE host_name = ?", (host_name,))
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
             exists = cursor.fetchone() is not None
             if not exists:
+                logging.warning(f"update_host_subscription_url: host not found by name='{host_name}' (after TRIM)")
                 return False
             cursor.execute(
-                "UPDATE xui_hosts SET subscription_url = ? WHERE host_name = ?",
+                "UPDATE xui_hosts SET subscription_url = ? WHERE TRIM(host_name) = TRIM(?)",
                 (subscription_url, host_name)
             )
             conn.commit()
