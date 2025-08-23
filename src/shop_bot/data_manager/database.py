@@ -9,6 +9,15 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path("/app/project")
 DB_FILE = PROJECT_ROOT / "users.db"
 
+def normalize_host_name(name: str | None) -> str:
+    """Normalize host name by trimming and removing invisible/unicode spaces.
+    Removes: NBSP(\u00A0), ZERO WIDTH SPACE(\u200B), ZWNJ(\u200C), ZWJ(\u200D), BOM(\uFEFF).
+    """
+    s = (name or "").strip()
+    for ch in ("\u00A0", "\u200B", "\u200C", "\u200D", "\uFEFF"):
+        s = s.replace(ch, "")
+    return s
+
 def initialize_db():
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -246,6 +255,26 @@ def run_migration():
                 logging.info(" -> The column 'subscription_url' is successfully added to 'xui_hosts'.")
             else:
                 logging.info(" -> The column 'subscription_url' already exists in 'xui_hosts'.")
+            # Clean up host_name values from invisible spaces and trim
+            try:
+                cursor.execute(
+                    """
+                    UPDATE xui_hosts
+                    SET host_name = TRIM(
+                        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(host_name,
+                            char(160), ''),      -- NBSP
+                            char(8203), ''),     -- ZERO WIDTH SPACE
+                            char(8204), ''),     -- ZWNJ
+                            char(8205), ''),     -- ZWJ
+                            char(65279), ''      -- BOM
+                        )
+                    )
+                    """
+                )
+                conn.commit()
+                logging.info(" -> Normalized existing host_name values in 'xui_hosts'.")
+            except Exception as e:
+                logging.warning(f" -> Failed to normalize existing host_name values: {e}")
         else:
             logging.warning("Table 'xui_hosts' not found, skipping its migration.")
         conn.close()
@@ -274,7 +303,7 @@ def create_new_transactions_table(cursor: sqlite3.Cursor):
 
 def create_host(name: str, url: str, user: str, passwd: str, inbound: int, subscription_url: str | None = None):
     try:
-        name = (name or "").strip()
+        name = normalize_host_name(name)
         url = (url or "").strip()
         user = (user or "").strip()
         passwd = passwd or ""
@@ -303,6 +332,7 @@ def create_host(name: str, url: str, user: str, passwd: str, inbound: int, subsc
 
 def update_host_subscription_url(host_name: str, subscription_url: str | None) -> bool:
     try:
+        host_name = normalize_host_name(host_name)
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
@@ -322,10 +352,11 @@ def update_host_subscription_url(host_name: str, subscription_url: str | None) -
 
 def delete_host(host_name: str):
     try:
+        host_name = normalize_host_name(host_name)
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM plans WHERE host_name = ?", (host_name,))
-            cursor.execute("DELETE FROM xui_hosts WHERE host_name = ?", (host_name,))
+            cursor.execute("DELETE FROM plans WHERE TRIM(host_name) = TRIM(?)", (host_name,))
+            cursor.execute("DELETE FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
             conn.commit()
             logging.info(f"Successfully deleted host '{host_name}' and its plans.")
     except sqlite3.Error as e:
@@ -333,10 +364,11 @@ def delete_host(host_name: str):
 
 def get_host(host_name: str) -> dict | None:
     try:
+        host_name = normalize_host_name(host_name)
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM xui_hosts WHERE host_name = ?", (host_name,))
+            cursor.execute("SELECT * FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
             result = cursor.fetchone()
             return dict(result) if result else None
     except sqlite3.Error as e:
@@ -350,7 +382,13 @@ def get_all_hosts() -> list[dict]:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM xui_hosts")
             hosts = cursor.fetchall()
-            return [dict(row) for row in hosts]
+            # Normalize host_name in returned dicts to avoid trailing/invisible chars in runtime
+            result = []
+            for row in hosts:
+                d = dict(row)
+                d['host_name'] = normalize_host_name(d.get('host_name'))
+                result.append(d)
+            return result
     except sqlite3.Error as e:
         logging.error(f"Error getting list of all hosts: {e}")
         return []
@@ -403,6 +441,7 @@ def update_setting(key: str, value: str):
 
 def create_plan(host_name: str, plan_name: str, months: int, price: float):
     try:
+        host_name = normalize_host_name(host_name)
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -416,10 +455,11 @@ def create_plan(host_name: str, plan_name: str, months: int, price: float):
 
 def get_plans_for_host(host_name: str) -> list[dict]:
     try:
+        host_name = normalize_host_name(host_name)
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM plans WHERE host_name = ? ORDER BY months", (host_name,))
+            cursor.execute("SELECT * FROM plans WHERE TRIM(host_name) = TRIM(?) ORDER BY months", (host_name,))
             plans = cursor.fetchall()
             return [dict(plan) for plan in plans]
     except sqlite3.Error as e:
@@ -768,6 +808,7 @@ def get_next_key_number(user_id: int) -> int:
 
 def get_keys_for_host(host_name: str) -> list[dict]:
     try:
+        host_name = normalize_host_name(host_name)
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
