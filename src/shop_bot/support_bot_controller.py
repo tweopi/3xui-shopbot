@@ -63,12 +63,10 @@ class SupportBotController:
         try:
             self._bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
             self._dp = Dispatcher()
-
-            # Only support module router
+            
             router = get_support_router()
             self._dp.include_router(router)
-
-            # Ensure no Telegram webhook is set before starting polling
+            
             try:
                 asyncio.run_coroutine_threadsafe(self._bot.delete_webhook(drop_pending_updates=True), self._loop)
             except Exception as e:

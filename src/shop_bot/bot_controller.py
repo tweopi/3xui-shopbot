@@ -72,8 +72,7 @@ class BotController:
             user_router = get_user_router()
             
             self._dp.include_router(user_router)
-
-            # Ensure no Telegram webhook is set before starting polling
+            
             try:
                 asyncio.run_coroutine_threadsafe(self._bot.delete_webhook(drop_pending_updates=True), self._loop)
             except Exception as e:

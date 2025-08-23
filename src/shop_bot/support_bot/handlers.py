@@ -93,11 +93,9 @@ def get_support_router() -> Router:
 
     @router.message(CommandStart(), F.chat.type == "private")
     async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
-        # If started with /start new, immediately prompt to create a ticket
         args = (message.text or "").split(maxsplit=1)
         arg = None
         if len(args) > 1:
-            # Telegram uses /start <payload>, aiogram packs it in text for deep-link
             arg = args[1].strip()
         if arg == "new":
             existing = _get_latest_open_ticket(message.from_user.id)
@@ -110,7 +108,6 @@ def get_support_router() -> Router:
                 await state.set_state(SupportDialog.waiting_for_subject)
             return
         support_text = get_setting("support_text") or "Раздел поддержки. Вы можете создать обращение или открыть существующее."
-        # Show a ReplyKeyboard (buttons under input field)
         await message.answer(
             support_text,
             reply_markup=types.ReplyKeyboardMarkup(
@@ -145,10 +142,8 @@ def get_support_router() -> Router:
     async def support_message_received(message: types.Message, state: FSMContext, bot: Bot):
         user_id = message.from_user.id
         data = await state.get_data()
-        # Normalize subject to avoid empty subject
         raw_subject = (data.get("subject") or "").strip()
         subject = raw_subject if raw_subject else "Обращение без темы"
-        # Reuse existing open ticket if present
         existing = _get_latest_open_ticket(user_id)
         created_new = False
         if existing:
@@ -164,14 +159,11 @@ def get_support_router() -> Router:
             add_support_message(ticket_id, sender="user", content=(message.text or message.caption or ""))
             ticket = get_ticket(ticket_id)
             created_new = True
-        # Create forum topic in support group if configured
         support_forum_chat_id = get_setting("support_forum_chat_id")
         thread_id = None
         if support_forum_chat_id and not (ticket and ticket.get('message_thread_id')):
             try:
                 chat_id = int(support_forum_chat_id)
-                # Build forum topic name with author mention
-                # Prefer @username, then full name, then numeric ID
                 author_tag = (
                     (message.from_user.username and f"@{message.from_user.username}")
                     or (message.from_user.full_name if message.from_user else None)
@@ -197,7 +189,6 @@ def get_support_router() -> Router:
                 await bot.send_message(chat_id=chat_id, text=header, message_thread_id=thread_id, reply_markup=_admin_actions_kb(ticket_id))
             except Exception as e:
                 logger.warning(f"Failed to create forum topic or send message for ticket {ticket_id}: {e}")
-        # Mirror user's message to existing or newly created forum thread (supports media/files)
         try:
             ticket = get_ticket(ticket_id)
             forum_chat_id = ticket and ticket.get('forum_chat_id')
@@ -231,7 +222,6 @@ def get_support_router() -> Router:
                 f"✉️ Сообщение добавлено в ваш открытый тикет #{ticket_id}.",
                 reply_markup=_user_main_reply_kb()
             )
-        # Notify admin
         admin_id = get_setting("admin_telegram_id")
         if admin_id:
             try:
@@ -284,7 +274,6 @@ def get_support_router() -> Router:
             ""
         ]
         for m in messages:
-            # Hide internal notes from user view
             if m.get('sender') == 'note':
                 continue
             who = "Вы" if m.get('sender') == 'user' else 'Поддержка'
@@ -326,13 +315,11 @@ def get_support_router() -> Router:
         try:
             forum_chat_id = ticket.get('forum_chat_id')
             thread_id = ticket.get('message_thread_id')
-            # Auto-create thread if missing
             if not (forum_chat_id and thread_id):
                 support_forum_chat_id = get_setting("support_forum_chat_id")
                 if support_forum_chat_id:
                     try:
                         chat_id = int(support_forum_chat_id)
-                        # Build forum topic name with author using username/full name if available
                         subj_full = (ticket.get('subject') or 'Обращение без темы')
                         is_star = subj_full.strip().startswith('⭐')
                         display_subj = (subj_full.lstrip('⭐️ ').strip() if is_star else subj_full)
@@ -359,7 +346,6 @@ def get_support_router() -> Router:
                     except Exception as e:
                         logger.warning(f"Failed to auto-create forum topic for ticket {ticket_id}: {e}")
             if forum_chat_id and thread_id:
-                # Ensure topic title always has up-to-date subject (with ⭐ if any) and author mention
                 try:
                     subj_full = (ticket.get('subject') or 'Обращение без темы')
                     is_star = subj_full.strip().startswith('⭐')
@@ -399,7 +385,6 @@ def get_support_router() -> Router:
             except Exception as e:
                 logger.warning(f"Failed to notify admin about ticket message #{ticket_id}: {e}")
 
-    # Relay messages from forum thread to the ticket owner (admin -> user)
     @router.message(F.is_topic_message == True)
     async def forum_thread_message_handler(message: types.Message, bot: Bot, state: FSMContext):
         try:
@@ -411,7 +396,6 @@ def get_support_router() -> Router:
             if not ticket:
                 return
             user_id = int(ticket.get('user_id'))
-            # If admin is adding an internal note, save it here and do not relay to user
             try:
                 current_state = await state.get_state()
                 if current_state == AdminDialog.waiting_for_note.state:
@@ -432,11 +416,9 @@ def get_support_router() -> Router:
                     return
             except Exception:
                 pass
-            # Ignore messages from the bot itself
             me = await bot.get_me()
             if message.from_user and message.from_user.id == me.id:
                 return
-            # Allow only admins to relay messages
             try:
                 admin_setting = get_setting("admin_telegram_id")
                 is_admin_by_setting = admin_setting and int(admin_setting) == message.from_user.id
@@ -450,7 +432,6 @@ def get_support_router() -> Router:
                 pass
             if not (is_admin_by_setting or is_admin_in_chat):
                 return
-            # Log as admin message and relay any content to user
             content = (message.text or message.caption or "").strip()
             if content:
                 add_support_message(ticket_id=int(ticket['ticket_id']), sender='admin', content=content)
@@ -459,7 +440,6 @@ def get_support_router() -> Router:
                 chat_id=user_id,
                 text=f"💬 Ответ поддержки по тикету #{ticket['ticket_id']} от {admin_name}"
             )
-            # Copy original message to preserve media/formatting
             try:
                 await bot.copy_message(
                     chat_id=user_id,
@@ -468,7 +448,6 @@ def get_support_router() -> Router:
                     reply_to_message_id=header.message_id
                 )
             except Exception:
-                # Fallback: send text if copy fails
                 if content:
                     await bot.send_message(chat_id=user_id, text=content)
         except Exception as e:
@@ -487,12 +466,10 @@ def get_support_router() -> Router:
             return
         ok = set_ticket_status(ticket_id, 'closed')
         if ok:
-            # Close related forum topic if exists (do not delete)
             try:
                 forum_chat_id = ticket.get('forum_chat_id')
                 thread_id = ticket.get('message_thread_id')
                 if forum_chat_id and thread_id:
-                    # Notify in thread that user closed the ticket
                     try:
                         username = (callback.from_user.username and f"@{callback.from_user.username}") or callback.from_user.full_name or str(callback.from_user.id)
                         await bot.send_message(
@@ -500,7 +477,6 @@ def get_support_router() -> Router:
                             text=f"✅ Пользователь {username} закрыл тикет #{ticket_id}.",
                             message_thread_id=int(thread_id)
                         )
-                        # Post fresh control panel reflecting new status (shows Reopen)
                         await bot.send_message(
                             chat_id=int(forum_chat_id),
                             text="Панель управления тикетом:",
@@ -509,19 +485,17 @@ def get_support_router() -> Router:
                         )
                     except Exception:
                         pass
-                    await bot.close_forum_topic(chat_id=int(forum_chat_id), message_thread_id=int(thread_id))
+                await bot.close_forum_topic(chat_id=int(forum_chat_id), message_thread_id=int(thread_id))
             except Exception as e:
                 logger.warning(f"Failed to close forum topic for ticket {ticket_id} from bot: {e}")
             await callback.message.edit_text("✅ Тикет закрыт.", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="⬅️ К списку", callback_data="support_my_tickets")]]))
-            # Also re-show main reply keyboard in private chat
             try:
                 await callback.message.answer("Меню поддержки:", reply_markup=_user_main_reply_kb())
             except Exception:
                 pass
         else:
-            await callback.message.edit_text("❌ Не удалось закрыть тикет. Попробуйте позже.")
+            await callback.message.edit_text("❌ Не удалось закрыть тикет.")
 
-    # Admin actions in forum threads
     @router.callback_query(F.data.startswith("admin_close_"))
     async def admin_close_ticket(callback: types.CallbackQuery, bot: Bot):
         await callback.answer()
@@ -549,12 +523,10 @@ def get_support_router() -> Router:
                     reply_markup=_admin_actions_kb(ticket_id)
                 )
             except TelegramBadRequest as e:
-                # Ignore harmless "message is not modified" errors
                 if "message is not modified" in str(e):
                     await callback.answer("Без изменений", show_alert=False)
                 else:
                     raise
-            # Notify ticket owner in DM about closure
             try:
                 user_id = int(ticket.get('user_id'))
                 await bot.send_message(chat_id=user_id, text=f"✅ Ваш тикет #{ticket_id} был закрыт администратором. Спасибо за обращение!")
@@ -590,12 +562,10 @@ def get_support_router() -> Router:
                     reply_markup=_admin_actions_kb(ticket_id)
                 )
             except TelegramBadRequest as e:
-                # Ignore harmless "message is not modified" errors
                 if "message is not modified" in str(e):
                     await callback.answer("Без изменений", show_alert=False)
                 else:
                     raise
-            # Notify ticket owner in DM about reopen
             try:
                 user_id = int(ticket.get('user_id'))
                 await bot.send_message(chat_id=user_id, text=f"🔓 Ваш тикет #{ticket_id} был переоткрыт администратором. Вы можете продолжить переписку.")
@@ -618,13 +588,11 @@ def get_support_router() -> Router:
         forum_chat_id = int(ticket.get('forum_chat_id') or callback.message.chat.id)
         if not await _is_admin(bot, forum_chat_id, callback.from_user.id):
             return
-        # Try to delete forum topic first
         try:
             thread_id = ticket.get('message_thread_id')
             if thread_id:
                 await bot.delete_forum_topic(chat_id=forum_chat_id, message_thread_id=int(thread_id))
         except Exception:
-            # Fallback: try to close if cannot delete
             try:
                 if thread_id:
                     await bot.close_forum_topic(chat_id=forum_chat_id, message_thread_id=int(thread_id))
@@ -634,7 +602,6 @@ def get_support_router() -> Router:
             try:
                 await callback.message.edit_text(f"🗑 Тикет #{ticket_id} удалён.")
             except TelegramBadRequest as e:
-                # If original message disappeared (e.g., topic deleted) or cannot be edited, just send a new one
                 if "message to edit not found" in str(e) or "message is not modified" in str(e):
                     await callback.message.answer(f"🗑 Тикет #{ticket_id} удалён.")
                 else:
@@ -664,7 +631,6 @@ def get_support_router() -> Router:
             base_subject = subject if subject else "Обращение без темы"
             new_subject = f"⭐ {base_subject}"
         if update_ticket_subject(ticket_id, new_subject):
-            # Try rename topic with author mention
             try:
                 thread_id = ticket.get('message_thread_id')
                 if thread_id and ticket.get('forum_chat_id'):
@@ -688,7 +654,6 @@ def get_support_router() -> Router:
                     await bot.edit_forum_topic(chat_id=int(ticket['forum_chat_id']), message_thread_id=int(thread_id), name=topic_name)
             except Exception:
                 pass
-            # Post service status message in thread and pin/unpin
             try:
                 thread_id = ticket.get('message_thread_id')
                 forum_chat_id = ticket.get('forum_chat_id')
@@ -700,13 +665,11 @@ def get_support_router() -> Router:
                         text=f"⭐ Важность {state_text} для тикета #{ticket_id}."
                     )
                     if not is_starred:
-                        # включили важность → закрепим служебное сообщение
                         try:
                             await bot.pin_chat_message(chat_id=int(forum_chat_id), message_id=msg.message_id, disable_notification=True)
                         except Exception:
                             pass
                     else:
-                        # сняли важность → попробуем убрать все пины в треде
                         try:
                             await bot.unpin_all_forum_topic_messages(chat_id=int(forum_chat_id), message_thread_id=int(thread_id))
                         except Exception:
@@ -784,7 +747,6 @@ def get_support_router() -> Router:
         for m in notes:
             created = m.get('created_at')
             content = (m.get('content') or '').strip()
-            # Каждая заметка уже содержит подпись автора в первой строке
             lines.append(f"— ({created})\n{content}")
         text = "\n\n".join(lines)
         await callback.message.answer(text)
@@ -797,7 +759,6 @@ def get_support_router() -> Router:
             await message.answer("❌ Не найден контекст тикета для заметки.")
             await state.clear()
             return
-        # Save as internal note; do not mirror to user
         author_id = message.from_user.id if message.from_user else None
         username = None
         if message.from_user:
@@ -811,7 +772,6 @@ def get_support_router() -> Router:
         await message.answer("📝 Внутренняя заметка сохранена.")
         await state.clear()
 
-    # Message handlers for ReplyKeyboard buttons
     @router.message(F.text == "▶️ Начать", F.chat.type == "private")
     async def start_text_button(message: types.Message, state: FSMContext):
         existing = _get_latest_open_ticket(message.from_user.id)
@@ -848,10 +808,8 @@ def get_support_router() -> Router:
                 rows.append([types.InlineKeyboardButton(text=title, callback_data=f"support_view_{t['ticket_id']}")])
         await message.answer(text, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=rows))
 
-    # Catch-all: relay any message from user to the open ticket's forum thread
     @router.message(F.chat.type == "private")
     async def relay_user_message_to_forum(message: types.Message, bot: Bot, state: FSMContext):
-        # Ignore if we are in the middle of FSM flow
         current_state = await state.get_state()
         if current_state is not None:
             return
@@ -862,7 +820,6 @@ def get_support_router() -> Router:
 
         tickets = get_user_tickets(user_id)
         content = (message.text or message.caption or '')
-        # If no tickets or no open ones — create a new ticket automatically
         ticket = None
         if not tickets:
             ticket_id = create_support_ticket(user_id, None)
@@ -877,13 +834,11 @@ def get_support_router() -> Router:
                 ticket = get_ticket(ticket_id)
                 created_new = True
             else:
-                # Use latest open ticket
                 ticket = max(open_tickets, key=lambda t: int(t['ticket_id']))
                 ticket_id = int(ticket['ticket_id'])
                 add_support_message(ticket_id, sender='user', content=content)
                 created_new = False
 
-        # Mirror to forum thread, auto-create topic if missing
         try:
             forum_chat_id = ticket.get('forum_chat_id')
             thread_id = ticket.get('message_thread_id')
@@ -918,7 +873,6 @@ def get_support_router() -> Router:
                     except Exception as e:
                         logger.warning(f"Failed to auto-create forum topic for ticket {ticket_id}: {e}")
             if forum_chat_id and thread_id:
-                # Ensure the existing topic has subject (with ⭐ if present) and author mention
                 try:
                     subj_full = (ticket.get('subject') or 'Обращение без темы')
                     is_star = subj_full.strip().startswith('⭐')
@@ -947,7 +901,6 @@ def get_support_router() -> Router:
         except Exception as e:
             logger.warning(f"Failed to mirror user free-form message to forum for ticket {ticket_id}: {e}")
 
-        # Acknowledge to user
         try:
             if created_new:
                 await message.answer(f"✅ Обращение создано: #{ticket_id}. Мы ответим вам как можно скорее.")

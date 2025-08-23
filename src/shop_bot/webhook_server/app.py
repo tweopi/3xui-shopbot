@@ -25,7 +25,7 @@ from shop_bot.data_manager.database import (
     ban_user, unban_user, delete_user_keys, get_setting, find_and_complete_ton_transaction,
     get_tickets_paginated, get_open_tickets_count, get_ticket, get_ticket_messages,
     add_support_message, set_ticket_status, delete_ticket,
-    get_closed_tickets_count, get_all_tickets_count
+    get_closed_tickets_count, get_all_tickets_count, update_host_subscription_url
 )
 
 _bot_controller = None
@@ -39,7 +39,6 @@ ALL_SETTINGS_KEYS = [
     "heleket_merchant_id", "heleket_api_key", "domain", "referral_percentage",
     "referral_discount", "ton_wallet_address", "tonapi_key", "force_subscription", "trial_enabled", "trial_duration_days", "enable_referrals", "minimum_withdrawal",
     "support_forum_chat_id",
-    # Support bot specific
     "support_bot_token", "support_bot_username"
 ]
 
@@ -47,7 +46,6 @@ def create_webhook_app(bot_controller_instance):
     global _bot_controller
     _bot_controller = bot_controller_instance
 
-    # Diagnostic information to help verify template/static paths at runtime
     app_file_path = os.path.abspath(__file__)
     app_dir = os.path.dirname(app_file_path)
     template_dir = os.path.join(app_dir, 'templates')
@@ -110,7 +108,6 @@ def create_webhook_app(bot_controller_instance):
         required_support_for_start = ['support_bot_token', 'support_bot_username', 'admin_telegram_id']
         all_settings_ok = all(settings.get(key) for key in required_for_start)
         support_settings_ok = all(settings.get(key) for key in required_support_for_start)
-        # Ticket counters for header badges
         try:
             open_tickets_count = get_open_tickets_count()
             closed_tickets_count = get_closed_tickets_count()
@@ -213,7 +210,6 @@ def create_webhook_app(bot_controller_instance):
                     flash('Сообщение не может быть пустым.', 'warning')
                 else:
                     add_support_message(ticket_id, sender='admin', content=message)
-                    # Try to deliver the reply to the user's Telegram chat via support-bot
                     try:
                         bot = _support_bot_controller.get_bot_instance()
                         loop = current_app.config.get('EVENT_LOOP')
@@ -225,7 +221,6 @@ def create_webhook_app(bot_controller_instance):
                             logger.error("Support reply: support bot or event loop is not available; message not sent to user.")
                     except Exception as e:
                         logger.error(f"Support reply: failed to send Telegram message to user {ticket.get('user_id')} via support-bot: {e}", exc_info=True)
-                    # Also mirror the admin reply to the forum thread if available
                     try:
                         bot = _support_bot_controller.get_bot_instance()
                         loop = current_app.config.get('EVENT_LOOP')
@@ -243,7 +238,6 @@ def create_webhook_app(bot_controller_instance):
                 return redirect(url_for('support_ticket_page', ticket_id=ticket_id))
             elif action == 'close':
                 if ticket.get('status') != 'closed' and set_ticket_status(ticket_id, 'closed'):
-                    # Close forum topic if exists
                     try:
                         bot = _support_bot_controller.get_bot_instance()
                         loop = current_app.config.get('EVENT_LOOP')
@@ -256,7 +250,6 @@ def create_webhook_app(bot_controller_instance):
                             )
                     except Exception as e:
                         logger.warning(f"Support close: failed to close forum topic for ticket {ticket_id}: {e}")
-                    # Notify user
                     try:
                         bot = _support_bot_controller.get_bot_instance()
                         loop = current_app.config.get('EVENT_LOOP')
@@ -272,7 +265,6 @@ def create_webhook_app(bot_controller_instance):
                 return redirect(url_for('support_ticket_page', ticket_id=ticket_id))
             elif action == 'open':
                 if ticket.get('status') != 'open' and set_ticket_status(ticket_id, 'open'):
-                    # Reopen forum topic if exists
                     try:
                         bot = _support_bot_controller.get_bot_instance()
                         loop = current_app.config.get('EVENT_LOOP')
@@ -311,7 +303,6 @@ def create_webhook_app(bot_controller_instance):
         if not ticket:
             return jsonify({"error": "not_found"}), 404
         messages = get_ticket_messages(ticket_id) or []
-        # Normalize fields
         items = [
             {
                 "sender": m.get('sender'),
@@ -333,7 +324,6 @@ def create_webhook_app(bot_controller_instance):
         if not ticket:
             flash('Тикет не найден.', 'danger')
             return redirect(url_for('support_list_page'))
-        # Try to delete related forum topic before removing ticket
         try:
             bot = _support_bot_controller.get_bot_instance()
             loop = current_app.config.get('EVENT_LOOP')
@@ -345,7 +335,6 @@ def create_webhook_app(bot_controller_instance):
                         bot.delete_forum_topic(chat_id=int(forum_chat_id), message_thread_id=int(thread_id)),
                         loop
                     )
-                    # Wait shortly to ensure execution and catch API errors
                     fut.result(timeout=5)
                 except Exception as e:
                     logger.warning(f"Delete forum topic failed for ticket {ticket_id} (chat {forum_chat_id}, thread {thread_id}): {e}. Trying to close topic as fallback.")
@@ -396,10 +385,24 @@ def create_webhook_app(bot_controller_instance):
         common_data = get_common_template_data()
         return render_template('settings.html', settings=current_settings, hosts=hosts, **common_data)
 
+    @flask_app.route('/update-host-subscription', methods=['POST'])
+    @login_required
+    def update_host_subscription_route():
+        host_name = (request.form.get('host_name') or '').strip()
+        sub_url = (request.form.get('host_subscription_url') or '').strip()
+        if not host_name:
+            flash('Не указан хост для обновления ссылки подписки.', 'danger')
+            return redirect(url_for('settings_page'))
+        ok = update_host_subscription_url(host_name, sub_url or None)
+        if ok:
+            flash('Ссылка подписки для хоста обновлена.', 'success')
+        else:
+            flash('Не удалось обновить ссылку подписки для хоста (возможно, хост не найден).', 'danger')
+        return redirect(url_for('settings_page'))
+
     @flask_app.route('/start-support-bot', methods=['POST'])
     @login_required
     def start_support_bot_route():
-        # Ensure event loop is set for the controller
         loop = current_app.config.get('EVENT_LOOP')
         if loop and loop.is_running():
             _support_bot_controller.set_loop(loop)
@@ -407,7 +410,6 @@ def create_webhook_app(bot_controller_instance):
         flash(result['message'], 'success' if result['status'] == 'success' else 'danger')
         return redirect(request.referrer or url_for('settings_page'))
 
-    # Helper to wait until a controller stops (up to timeout seconds)
     def _wait_for_stop(controller, timeout: float = 5.0) -> bool:
         start = time.time()
         while time.time() - start < timeout:
@@ -421,7 +423,6 @@ def create_webhook_app(bot_controller_instance):
     @login_required
     def stop_support_bot_route():
         result = _support_bot_controller.stop()
-        # Wait briefly to let polling stop so UI reflects correct state
         _wait_for_stop(_support_bot_controller)
         flash(result['message'], 'success' if result['status'] == 'success' else 'danger')
         return redirect(request.referrer or url_for('settings_page'))
@@ -437,7 +438,6 @@ def create_webhook_app(bot_controller_instance):
     @login_required
     def stop_bot_route():
         result = _bot_controller.stop()
-        # Wait briefly to let polling stop so UI reflects correct state
         _wait_for_stop(_bot_controller)
         flash(result['message'], 'success' if result['status'] == 'success' else 'danger')
         return redirect(request.referrer or url_for('dashboard_page'))
@@ -445,12 +445,9 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/stop-both-bots', methods=['POST'])
     @login_required
     def stop_both_bots_route():
-        # Stop main bot
         main_result = _bot_controller.stop()
-        # Stop support bot
         support_result = _support_bot_controller.stop()
 
-        # Build combined feedback
         statuses = []
         categories = []
         for name, res in [('Основной бот', main_result), ('Support-бот', support_result)]:
@@ -460,7 +457,6 @@ def create_webhook_app(bot_controller_instance):
             else:
                 statuses.append(f"{name}: ошибка — {res.get('message')}")
                 categories.append('danger')
-        # Wait briefly so subsequent render sees correct states
         _wait_for_stop(_bot_controller)
         _wait_for_stop(_support_bot_controller)
         category = 'danger' if 'danger' in categories else 'success'
@@ -470,15 +466,12 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/start-both-bots', methods=['POST'])
     @login_required
     def start_both_bots_route():
-        # Start main bot
         main_result = _bot_controller.start()
-        # Ensure event loop for support controller
         loop = current_app.config.get('EVENT_LOOP')
         if loop and loop.is_running():
             _support_bot_controller.set_loop(loop)
         support_result = _support_bot_controller.start()
 
-        # Build combined feedback
         statuses = []
         categories = []
         for name, res in [('Основной бот', main_result), ('Support-бот', support_result)]:
@@ -488,7 +481,6 @@ def create_webhook_app(bot_controller_instance):
             else:
                 statuses.append(f"{name}: ошибка — {res.get('message')}")
                 categories.append('danger')
-        # Prefer worst category if any error
         category = 'danger' if 'danger' in categories else 'success'
         flash(' | '.join(statuses), category)
         return redirect(request.referrer or url_for('settings_page'))
@@ -535,7 +527,8 @@ def create_webhook_app(bot_controller_instance):
             url=request.form['host_url'],
             user=request.form['host_username'],
             passwd=request.form['host_pass'],
-            inbound=int(request.form['host_inbound_id'])
+            inbound=int(request.form['host_inbound_id']),
+            subscription_url=(request.form.get('host_subscription_url') or '').strip() or None
         )
         flash(f"Хост '{request.form['host_name']}' успешно добавлен.", 'success')
         return redirect(url_for('settings_page'))

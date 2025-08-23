@@ -61,6 +61,16 @@
 							required
 						/>
 					</div>
+					<div class="form-group">
+						<label for="host_subscription_url">Ссылка подписки для этого хоста (опционально):</label>
+						<input
+							type="text"
+							id="host_subscription_url"
+							name="host_subscription_url"
+							placeholder="например, https://sub.example.com/{token}"
+						/>
+						<small>Можно использовать {token} для подстановки индивидуального токена подписки клиента.</small>
+					</div>
 					<button type="submit" class="button button-primary">Добавить</button>
 				</form>
 			</div>
@@ -80,6 +90,11 @@
 					</form>
 				</div>
 				<p><strong>URL:</strong> {{ host.host_url }}</p>
+				<form action="{{ url_for('update_host_subscription_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
+					<input type="hidden" name="host_name" value="{{ host.host_name }}" />
+					<input type="text" name="host_subscription_url" placeholder="Ссылка подписки для этого хоста" value="{{ host.subscription_url or '' }}" style="min-width:320px;" />
+					<button type="submit" class="button button-secondary button-small" style="margin-left:6px;">Сохранить ссылку</button>
+				</form>
 				<div class="plans-section">
 					<h4>Тарифы:</h4>
 					{% if host.plans %}

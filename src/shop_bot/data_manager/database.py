@@ -63,7 +63,8 @@ def initialize_db():
                     host_url TEXT NOT NULL,
                     host_username TEXT NOT NULL,
                     host_pass TEXT NOT NULL,
-                    host_inbound_id INTEGER NOT NULL
+                    host_inbound_id INTEGER NOT NULL,
+                    subscription_url TEXT
                 )
             ''')
             cursor.execute('''
@@ -196,7 +197,6 @@ def run_migration():
             create_new_transactions_table(cursor)
             logging.info("The new table 'Transactions' has been successfully created.")
 
-        # Migrate support_tickets: add forum/thread columns if missing
         logging.info("The migration of the table 'support_tickets' ...")
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='support_tickets'")
@@ -218,8 +218,7 @@ def run_migration():
             logging.warning("Table 'support_tickets' not found, skipping its migration.")
 
         conn.commit()
-
-        # Migrate support_messages: add media column if missing
+        
         logging.info("The migration of the table 'support_messages' ...")
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='support_messages'")
@@ -234,6 +233,21 @@ def run_migration():
                 logging.info(" -> The column 'media' already exists in 'support_messages'.")
         else:
             logging.warning("Table 'support_messages' not found, skipping its migration.")
+        
+        logging.info("The migration of the table 'xui_hosts' ...")
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xui_hosts'")
+        table_exists = cursor.fetchone()
+        if table_exists:
+            cursor.execute("PRAGMA table_info(xui_hosts)")
+            xh_columns = [row[1] for row in cursor.fetchall()]
+            if 'subscription_url' not in xh_columns:
+                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN subscription_url TEXT")
+                logging.info(" -> The column 'subscription_url' is successfully added to 'xui_hosts'.")
+            else:
+                logging.info(" -> The column 'subscription_url' already exists in 'xui_hosts'.")
+        else:
+            logging.warning("Table 'xui_hosts' not found, skipping its migration.")
         conn.close()
         
         logging.info("--- The database is successfully completed! ---")
@@ -258,18 +272,42 @@ def create_new_transactions_table(cursor: sqlite3.Cursor):
         )
     ''')
 
-def create_host(name: str, url: str, user: str, passwd: str, inbound: int):
+def create_host(name: str, url: str, user: str, passwd: str, inbound: int, subscription_url: str | None = None):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO xui_hosts (host_name, host_url, host_username, host_pass, host_inbound_id) VALUES (?, ?, ?, ?, ?)",
-                (name, url, user, passwd, inbound)
-            )
+            try:
+                cursor.execute(
+                    "INSERT INTO xui_hosts (host_name, host_url, host_username, host_pass, host_inbound_id, subscription_url) VALUES (?, ?, ?, ?, ?, ?)",
+                    (name, url, user, passwd, inbound, subscription_url)
+                )
+            except sqlite3.OperationalError:
+                cursor.execute(
+                    "INSERT INTO xui_hosts (host_name, host_url, host_username, host_pass, host_inbound_id) VALUES (?, ?, ?, ?, ?)",
+                    (name, url, user, passwd, inbound)
+                )
             conn.commit()
             logging.info(f"Successfully created a new host: {name}")
     except sqlite3.Error as e:
         logging.error(f"Error creating host '{name}': {e}")
+
+def update_host_subscription_url(host_name: str, subscription_url: str | None) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE host_name = ?", (host_name,))
+            exists = cursor.fetchone() is not None
+            if not exists:
+                return False
+            cursor.execute(
+                "UPDATE xui_hosts SET subscription_url = ? WHERE host_name = ?",
+                (subscription_url, host_name)
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update subscription_url for host '{host_name}': {e}")
+        return False
 
 def delete_host(host_name: str):
     try:
@@ -847,7 +885,6 @@ def delete_user_keys(user_id: int):
     except sqlite3.Error as e:
         logging.error(f"Failed to delete keys for user {user_id}: {e}")
 
-# --- Support tickets/messages CRUD ---
 def create_support_ticket(user_id: int, subject: str | None = None) -> int | None:
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -987,12 +1024,10 @@ def delete_ticket(ticket_id: int) -> bool:
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            # First delete messages to maintain FK consistency
             cursor.execute(
                 "DELETE FROM support_messages WHERE ticket_id = ?",
                 (ticket_id,)
             )
-            # Then delete the ticket itself
             cursor.execute(
                 "DELETE FROM support_tickets WHERE ticket_id = ?",
                 (ticket_id,)

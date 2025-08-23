@@ -552,7 +552,6 @@ def get_user_router() -> Router:
                 reply_markup=keyboards.create_support_bot_link_keyboard(support_bot_username)
             )
         else:
-            # Fallback на внешний контакт, если support_bot_username не задан
             support_user = get_setting("support_user")
             if support_user:
                 await callback.message.edit_text(
@@ -695,11 +694,9 @@ def get_user_router() -> Router:
         else:
             await message.answer("Контакты поддержки не настроены.")
 
-    # Relay messages from forum thread to the ticket owner (admin -> user)
     @user_router.message(F.is_topic_message == True)
     async def forum_thread_message_handler(message: types.Message, bot: Bot):
         try:
-            # Ensure this relay works only in dedicated support bot
             support_bot_username = get_setting("support_bot_username")
             me = await bot.get_me()
             if support_bot_username and (me.username or "").lower() != support_bot_username.lower():
@@ -712,10 +709,8 @@ def get_user_router() -> Router:
             if not ticket:
                 return
             user_id = int(ticket.get('user_id'))
-            # Ignore messages from the bot itself
             if message.from_user and message.from_user.id == me.id:
                 return
-            # Allow only admins to relay messages
             try:
                 admin_setting = get_setting("admin_telegram_id")
                 is_admin_by_setting = admin_setting and int(admin_setting) == message.from_user.id
@@ -729,7 +724,6 @@ def get_user_router() -> Router:
                 pass
             if not (is_admin_by_setting or is_admin_in_chat):
                 return
-            # Log as admin message and relay any content to user
             content = (message.text or message.caption or "").strip()
             if content:
                 add_support_message(ticket_id=int(ticket['ticket_id']), sender='admin', content=content)
@@ -737,7 +731,6 @@ def get_user_router() -> Router:
                 chat_id=user_id,
                 text=f"💬 Ответ поддержки по тикету #{ticket['ticket_id']}"
             )
-            # Copy original message to preserve media/formatting
             try:
                 await bot.copy_message(
                     chat_id=user_id,
@@ -746,7 +739,6 @@ def get_user_router() -> Router:
                     reply_to_message_id=header.message_id
                 )
             except Exception:
-                # Fallback: send text if copy fails
                 if content:
                     await bot.send_message(chat_id=user_id, text=content)
         except Exception as e:

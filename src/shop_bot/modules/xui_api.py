@@ -6,7 +6,7 @@ from typing import List, Dict
 
 from py3xui import Api, Client, Inbound
 
-from shop_bot.data_manager.database import get_host, get_key_by_email
+from shop_bot.data_manager.database import get_host, get_key_by_email, get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ def login_to_host(host_url: str, username: str, password: str, inbound_id: int) 
         
         if target_inbound is None:
             logger.error(f"Inbound with ID '{inbound_id}' not found on host '{host_url}'")
-            return api, None
+            return None, None
         return api, target_inbound
     except Exception as e:
         logger.error(f"Login or inbound retrieval failed for host '{host_url}': {e}", exc_info=True)
@@ -48,7 +48,42 @@ def get_connection_string(inbound: Inbound, user_uuid: str, host_url: str, remar
     )
     return connection_string
 
-def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days_to_add: int) -> tuple[str | None, int | None]:
+def get_subscription_link(user_uuid: str, host_url: str, host_name: str | None = None, sub_token: str | None = None) -> str:
+    """Build subscription URL with the following priority:
+    1) Host-specific subscription_url (xui_hosts.subscription_url)
+    2) Fallback: domain/host_url + default path
+    Supports optional token replacement if base contains "{token}".
+    """
+    host_base = None
+    try:
+        if host_name:
+            host = get_host(host_name)
+            if host:
+                host_base = (host.get("subscription_url") or "").strip()
+    except Exception:
+        host_base = None
+
+    base = (host_base or "").strip()
+
+    if sub_token:
+        if base:
+            return base.replace("{token}", sub_token) if "{token}" in base else f"{base.rstrip('/')}/{sub_token}"
+        domain = (get_setting("domain") or "").strip()
+        parsed = urlparse(host_url)
+        hostname = domain if domain else (parsed.hostname or "")
+        scheme = parsed.scheme if parsed.scheme in ("http", "https") else "https"
+        return f"{scheme}://{hostname}/sub/{sub_token}"
+
+    if base:
+        return base
+
+    domain = (get_setting("domain") or "").strip()
+    parsed = urlparse(host_url)
+    hostname = domain if domain else (parsed.hostname or "")
+    scheme = parsed.scheme if parsed.scheme in ("http", "https") else "https"
+    return f"{scheme}://{hostname}/sub/{user_uuid}?format=v2ray"
+
+def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days_to_add: int) -> tuple[str | None, int | None, str | None]:
     try:
         inbound_to_modify = api.inbound.get_by_id(inbound_id)
         if not inbound_to_modify:
@@ -75,11 +110,29 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
 
         new_expiry_ms = int(new_expiry_dt.timestamp() * 1000)
 
+        client_sub_token: str | None = None
+
         if client_index != -1:
             inbound_to_modify.settings.clients[client_index].reset = days_to_add
             inbound_to_modify.settings.clients[client_index].enable = True
             
             client_uuid = inbound_to_modify.settings.clients[client_index].id
+            try:
+                sub_token_existing = None
+                for attr in ("subId", "subscription", "sub_id"):
+                    if hasattr(inbound_to_modify.settings.clients[client_index], attr):
+                        sub_token_existing = getattr(inbound_to_modify.settings.clients[client_index], attr)
+                        break
+                if not sub_token_existing:
+                    import secrets
+                    client_sub_token = secrets.token_hex(12)
+                    for attr in ("subId", "subscription", "sub_id"):
+                        try:
+                            setattr(inbound_to_modify.settings.clients[client_index], attr, client_sub_token)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         else:
             client_uuid = str(uuid.uuid4())
             new_client = Client(
@@ -89,11 +142,21 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
                 flow="xtls-rprx-vision",
                 expiry_time=new_expiry_ms
             )
+            try:
+                import secrets
+                client_sub_token = secrets.token_hex(12)
+                for attr in ("subId", "subscription", "sub_id"):
+                    try:
+                        setattr(new_client, attr, client_sub_token)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             inbound_to_modify.settings.clients.append(new_client)
 
         api.inbound.update(inbound_id, inbound_to_modify)
 
-        return client_uuid, new_expiry_ms
+        return client_uuid, new_expiry_ms, client_sub_token
 
     except Exception as e:
         logger.error(f"Error in update_or_create_client_on_panel: {e}", exc_info=True)
@@ -115,14 +178,15 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
         logger.error(f"Workflow failed: Could not log in or find inbound on host '{host_name}'.")
         return None
         
-    client_uuid, new_expiry_ms = update_or_create_client_on_panel(api, inbound.id, email, days_to_add)
+    client_uuid, new_expiry_ms, client_sub_token = update_or_create_client_on_panel(api, inbound.id, email, days_to_add)
     if not client_uuid:
         logger.error(f"Workflow failed: Could not create/update client '{email}' on host '{host_name}'.")
         return None
     
-    connection_string = get_connection_string(inbound, client_uuid, host_data['host_url'], remark=host_name)
+    connection_string = get_subscription_link(client_uuid, host_data['host_url'], host_name, sub_token=client_sub_token)
     
     logger.info(f"Successfully processed key for '{email}' on host '{host_name}'.")
+    
     
     return {
         "client_uuid": client_uuid,
@@ -151,7 +215,28 @@ async def get_key_details_from_host(key_data: dict) -> dict | None:
     )
     if not api or not inbound: return None
 
-    connection_string = get_connection_string(inbound, key_data['xui_client_uuid'], host_db_data['host_url'], remark=host_name)
+    client_sub_token = None
+    try:
+        if inbound.settings and inbound.settings.clients:
+            for client in inbound.settings.clients:
+                if getattr(client, "id", None) == key_data['xui_client_uuid'] or getattr(client, "email", None) == key_data.get('email'):
+                    candidate_fields = ("subId", "subscription", "sub_id", "subscriptionId", "subscription_token")
+                    for attr in candidate_fields:
+                        val = None
+                        if hasattr(client, attr):
+                            val = getattr(client, attr)
+                        else:
+                            try:
+                                val = client.get(attr)
+                            except Exception:
+                                pass
+                        if val:
+                            client_sub_token = val
+                            break
+                    break
+    except Exception:
+        pass
+    connection_string = get_subscription_link(key_data['xui_client_uuid'], host_db_data['host_url'], host_name, sub_token=client_sub_token)
     return {"connection_string": connection_string}
 
 async def delete_client_on_host(host_name: str, client_email: str) -> bool:
@@ -184,3 +269,4 @@ async def delete_client_on_host(host_name: str, client_email: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to delete client '{client_to_delete['xui_client_uuid']}' from host '{host_name}': {e}", exc_info=True)
         return False
+            
