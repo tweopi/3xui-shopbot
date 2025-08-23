@@ -771,7 +771,7 @@ def get_keys_for_host(host_name: str) -> list[dict]:
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM vpn_keys WHERE host_name = ?", (host_name,))
+            cursor.execute("SELECT * FROM vpn_keys WHERE TRIM(host_name) = TRIM(?)", (host_name,))
             keys = cursor.fetchall()
             return [dict(key) for key in keys]
     except sqlite3.Error as e:

@@ -178,8 +178,63 @@ async def sync_keys_with_panels():
                     total_affected_records += 1
 
             if clients_on_server:
-                for orphan_email in clients_on_server.keys():
-                    logger.warning(f"Scheduler: Found orphan client '{orphan_email}' on host '{host_name}' that is not tracked by the bot.")
+                # Try to attach orphan clients from panel to local DB so old keys get subscriptions
+                for orphan_email, orphan_client in clients_on_server.items():
+                    try:
+                        # Extract user_id from email like: user12345-key1-...@telegram.bot
+                        import re
+                        m = re.search(r"user(\d+)", orphan_email)
+                        user_id = int(m.group(1)) if m else None
+                        if not user_id:
+                            logger.warning(
+                                f"Scheduler: Found orphan client '{orphan_email}' on host '{host_name}' but cannot infer user_id; leaving as is."
+                            )
+                            continue
+
+                        # Check that user exists
+                        usr = database.get_user(user_id)
+                        if not usr:
+                            logger.warning(
+                                f"Scheduler: Orphan client '{orphan_email}' suggests user_id={user_id}, but user not found; leaving as is."
+                            )
+                            continue
+
+                        # If key already present (race/duplicate), skip insert
+                        existing = database.get_key_by_email(orphan_email)
+                        if existing:
+                            continue
+
+                        reset_days = getattr(orphan_client, 'reset', 0) or 0
+                        expiry_ms = int(getattr(orphan_client, 'expiry_time', 0)) + int(reset_days) * 24 * 3600 * 1000
+                        client_uuid = getattr(orphan_client, 'id', None) or getattr(orphan_client, 'email', None) or ''
+
+                        if not client_uuid:
+                            logger.warning(
+                                f"Scheduler: Orphan client '{orphan_email}' has no UUID/id; cannot attach."
+                            )
+                            continue
+
+                        new_id = database.add_new_key(
+                            user_id=user_id,
+                            host_name=host_name,
+                            xui_client_uuid=str(client_uuid),
+                            key_email=orphan_email,
+                            expiry_timestamp_ms=expiry_ms,
+                        )
+                        if new_id:
+                            logger.info(
+                                f"Scheduler: Attached orphan client '{orphan_email}' on host '{host_name}' to user {user_id} as key_id={new_id}."
+                            )
+                            total_affected_records += 1
+                        else:
+                            logger.warning(
+                                f"Scheduler: Failed to attach orphan client '{orphan_email}' on host '{host_name}'."
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"Scheduler: Error while trying to attach orphan client '{orphan_email}' on host '{host_name}': {e}",
+                            exc_info=True,
+                        )
 
         except Exception as e:
             logger.error(f"Scheduler: An unexpected error occurred while processing host '{host_name}': {e}", exc_info=True)
