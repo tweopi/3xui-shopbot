@@ -42,7 +42,8 @@ from shop_bot.data_manager.database import (
     set_referral_balance, set_referral_balance_all,
     create_support_ticket, add_support_message, get_user_tickets,
     get_ticket, get_ticket_messages, set_ticket_status, update_ticket_thread_info,
-    get_ticket_by_thread
+    get_ticket_by_thread,
+    update_key_host_and_info
 )
 
 from shop_bot.config import (
@@ -867,6 +868,134 @@ def get_user_router() -> Router:
             logger.error(f"Error showing key {key_id_to_show}: {e}")
             await callback.message.edit_text("❌ Произошла ошибка при получении данных ключа.")
 
+    @user_router.callback_query(F.data.startswith("switch_server_"))
+    @registration_required
+    async def switch_server_start(callback: types.CallbackQuery):
+        await callback.answer()
+        try:
+            key_id = int(callback.data[len("switch_server_"):])
+        except ValueError:
+            await callback.answer("Некорректный идентификатор ключа.", show_alert=True)
+            return
+
+        key_data = get_key_by_id(key_id)
+        if not key_data or key_data.get('user_id') != callback.from_user.id:
+            await callback.answer("Ключ не найден.", show_alert=True)
+            return
+
+        hosts = get_all_hosts()
+        if not hosts:
+            await callback.answer("Нет доступных серверов.", show_alert=True)
+            return
+
+        current_host = key_data.get('host_name')
+        hosts = [h for h in hosts if h.get('host_name') != current_host]
+        if not hosts:
+            await callback.answer("Другие серверы отсутствуют.", show_alert=True)
+            return
+
+        await callback.message.edit_text(
+            "Выберите новый сервер (локацию) для этого ключа:",
+            reply_markup=keyboards.create_host_selection_keyboard(hosts, action=f"switch_{key_id}")
+        )
+
+    @user_router.callback_query(F.data.startswith("select_host_switch_"))
+    @registration_required
+    async def select_host_for_switch(callback: types.CallbackQuery):
+        await callback.answer()
+        payload = callback.data[len("select_host_switch_"):]
+        parts = payload.split("_", 1)
+        if len(parts) != 2:
+            await callback.answer("Некорректные данные выбора сервера.", show_alert=True)
+            return
+        try:
+            key_id = int(parts[0])
+        except ValueError:
+            await callback.answer("Некорректный идентификатор ключа.", show_alert=True)
+            return
+        new_host_name = parts[1]
+
+        key_data = get_key_by_id(key_id)
+        if not key_data or key_data.get('user_id') != callback.from_user.id:
+            await callback.answer("Ключ не найден.", show_alert=True)
+            return
+
+        old_host = key_data.get('host_name')
+        if not old_host:
+            await callback.answer("Для ключа не указан текущий сервер.", show_alert=True)
+            return
+        if new_host_name == old_host:
+            await callback.answer("Это уже текущий сервер.", show_alert=True)
+            return
+
+        # Рассчитываем оставшиеся дни (минимум 1)
+        try:
+            now_dt = datetime.now()
+            expiry_dt = datetime.fromisoformat(key_data['expiry_date'])
+            remaining_days = max(1, int((expiry_dt - now_dt).total_seconds() // 86400) + 1)
+        except Exception:
+            remaining_days = 1
+
+        await callback.message.edit_text(
+            f"⏳ Переношу ключ на сервер \"{new_host_name}\"..."
+        )
+
+        email = key_data.get('key_email')
+        try:
+            result = await xui_api.create_or_update_key_on_host(new_host_name, email, remaining_days)
+            if not result:
+                await callback.message.edit_text(
+                    f"❌ Не удалось перенести ключ на сервер \"{new_host_name}\". Попробуйте позже."
+                )
+                return
+
+            # Сначала удаляем на старом сервере, пока локально сохранен старый UUID по email
+            try:
+                await xui_api.delete_client_on_host(old_host, email)
+            except Exception:
+                pass
+
+            # Затем обновляем локальную БД новым хостом и UUID
+            update_key_host_and_info(
+                key_id=key_id,
+                new_host_name=new_host_name,
+                new_xui_uuid=result['client_uuid'],
+                new_expiry_ms=result['expiry_timestamp_ms']
+            )
+
+            # Показываем сразу обновлённые данные ключа
+            try:
+                updated_key = get_key_by_id(key_id)
+                details = await xui_api.get_key_details_from_host(updated_key)
+                if details and details.get('connection_string'):
+                    connection_string = details['connection_string']
+                    expiry_date = datetime.fromisoformat(updated_key['expiry_date'])
+                    created_date = datetime.fromisoformat(updated_key['created_date'])
+                    all_user_keys = get_user_keys(callback.from_user.id)
+                    key_number = next((i + 1 for i, k in enumerate(all_user_keys) if k['key_id'] == key_id), 0)
+                    final_text = get_key_info_text(key_number, expiry_date, created_date, connection_string)
+                    await callback.message.edit_text(
+                        text=final_text,
+                        reply_markup=keyboards.create_key_info_keyboard(key_id)
+                    )
+                else:
+                    # Fallback: показать сообщение об успехе
+                    await callback.message.edit_text(
+                        f"✅ Готово! Ключ перенесён на сервер \"{new_host_name}\".\n"
+                        "Обновите подписку/конфиг в клиенте, если требуется.",
+                        reply_markup=keyboards.create_back_to_menu_keyboard()
+                    )
+            except Exception:
+                await callback.message.edit_text(
+                    f"✅ Готово! Ключ перенесён на сервер \"{new_host_name}\".\n"
+                    "Обновите подписку/конфиг в клиенте, если требуется.",
+                    reply_markup=keyboards.create_back_to_menu_keyboard()
+                )
+        except Exception as e:
+            logger.error(f"Error switching key {key_id} to host {new_host_name}: {e}", exc_info=True)
+            await callback.message.edit_text(
+                "❌ Произошла ошибка при переносе ключа. Попробуйте позже."
+            )
 
     @user_router.callback_query(F.data.startswith("show_qr_"))
     @registration_required

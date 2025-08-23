@@ -801,6 +801,21 @@ def update_key_info(key_id: int, new_xui_uuid: str, new_expiry_ms: int):
             conn.commit()
     except sqlite3.Error as e:
         logging.error(f"Failed to update key {key_id}: {e}")
+ 
+def update_key_host_and_info(key_id: int, new_host_name: str, new_xui_uuid: str, new_expiry_ms: int):
+    """Update key's host, UUID and expiry in a single transaction."""
+    try:
+        new_host_name = normalize_host_name(new_host_name)
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            expiry_date = datetime.fromtimestamp(new_expiry_ms / 1000)
+            cursor.execute(
+                "UPDATE vpn_keys SET host_name = ?, xui_client_uuid = ?, expiry_date = ? WHERE key_id = ?",
+                (new_host_name, new_xui_uuid, expiry_date, key_id)
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update key {key_id} host and info: {e}")
 
 def get_next_key_number(user_id: int) -> int:
     keys = get_user_keys(user_id)
