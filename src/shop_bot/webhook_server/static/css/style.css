@@ -260,6 +260,10 @@ body.login-page {
 	justify-content: center;
 	height: 100vh;
 	padding: 0;
+	/* для фонового canvas */
+	position: relative;
+	overflow: hidden;
+	background: #0f0f12;
 }
 
 .login-container {
@@ -269,6 +273,23 @@ body.login-page {
 	background: #2d3238;
 	border-radius: 8px;
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+	position: relative;
+	z-index: 1; /* поверх фонового canvas */
+}
+
+/* Фоновая анимация для страницы логина */
+#scene {
+	position: fixed;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	display: block;
+	z-index: 0;
+	/* защита от выделения/перетаскивания */
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-user-drag: none;
 }
 
 .login-container h1 {
