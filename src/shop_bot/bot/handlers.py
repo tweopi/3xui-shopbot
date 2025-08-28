@@ -928,13 +928,14 @@ def get_user_router() -> Router:
             await callback.answer("Это уже текущий сервер.", show_alert=True)
             return
 
-        # Рассчитываем оставшиеся дни (минимум 1)
+        # Точное сохранение срока действия при переносе (без увеличения времени)
         try:
-            now_dt = datetime.now()
             expiry_dt = datetime.fromisoformat(key_data['expiry_date'])
-            remaining_days = max(1, int((expiry_dt - now_dt).total_seconds() // 86400) + 1)
+            expiry_timestamp_ms_exact = int(expiry_dt.timestamp() * 1000)
         except Exception:
-            remaining_days = 1
+            # Fallback: хотя бы 1 день, если дата в БД повреждена
+            now_dt = datetime.now()
+            expiry_timestamp_ms_exact = int((now_dt + timedelta(days=1)).timestamp() * 1000)
 
         await callback.message.edit_text(
             f"⏳ Переношу ключ на сервер \"{new_host_name}\"..."
@@ -942,7 +943,13 @@ def get_user_router() -> Router:
 
         email = key_data.get('key_email')
         try:
-            result = await xui_api.create_or_update_key_on_host(new_host_name, email, remaining_days)
+            # Передаём точный expiry_timestamp_ms, чтобы не увеличивать срок на панели при переносе
+            result = await xui_api.create_or_update_key_on_host(
+                new_host_name,
+                email,
+                days_to_add=None,
+                expiry_timestamp_ms=expiry_timestamp_ms_exact
+            )
             if not result:
                 await callback.message.edit_text(
                     f"❌ Не удалось перенести ключ на сервер \"{new_host_name}\". Попробуйте позже."

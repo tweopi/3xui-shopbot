@@ -83,7 +83,7 @@ def get_subscription_link(user_uuid: str, host_url: str, host_name: str | None =
     scheme = parsed.scheme if parsed.scheme in ("http", "https") else "https"
     return f"{scheme}://{hostname}/sub/{user_uuid}?format=v2ray"
 
-def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days_to_add: int) -> tuple[str | None, int | None, str | None]:
+def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days_to_add: int | None = None, target_expiry_ms: int | None = None) -> tuple[str | None, int | None, str | None]:
     try:
         inbound_to_modify = api.inbound.get_by_id(inbound_id)
         if not inbound_to_modify:
@@ -98,37 +98,47 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
                 client_index = i
                 break
         
-        if client_index != -1:
-            existing_client = inbound_to_modify.settings.clients[client_index]
-            if existing_client.expiry_time > int(datetime.now().timestamp() * 1000):
-                current_expiry_dt = datetime.fromtimestamp(existing_client.expiry_time / 1000)
-                new_expiry_dt = current_expiry_dt + timedelta(days=days_to_add)
+        # Determine new expiry time
+        if target_expiry_ms is not None:
+            new_expiry_ms = int(target_expiry_ms)
+        else:
+            if days_to_add is None:
+                raise ValueError("Either days_to_add or target_expiry_ms must be provided")
+            if client_index != -1:
+                existing_client = inbound_to_modify.settings.clients[client_index]
+                if existing_client.expiry_time > int(datetime.now().timestamp() * 1000):
+                    current_expiry_dt = datetime.fromtimestamp(existing_client.expiry_time / 1000)
+                    new_expiry_dt = current_expiry_dt + timedelta(days=days_to_add)
+                else:
+                    new_expiry_dt = datetime.now() + timedelta(days=days_to_add)
             else:
                 new_expiry_dt = datetime.now() + timedelta(days=days_to_add)
-        else:
-            new_expiry_dt = datetime.now() + timedelta(days=days_to_add)
 
-        new_expiry_ms = int(new_expiry_dt.timestamp() * 1000)
+            new_expiry_ms = int(new_expiry_dt.timestamp() * 1000)
 
         client_sub_token: str | None = None
 
         if client_index != -1:
-            inbound_to_modify.settings.clients[client_index].reset = days_to_add
+            # Keep traffic reset logic only when days_to_add provided
+            if days_to_add is not None:
+                inbound_to_modify.settings.clients[client_index].reset = days_to_add
             inbound_to_modify.settings.clients[client_index].enable = True
-            
-            client_uuid = inbound_to_modify.settings.clients[client_index].id
+            inbound_to_modify.settings.clients[client_index].expiry_time = new_expiry_ms
+
+            existing_client = inbound_to_modify.settings.clients[client_index]
+            client_uuid = existing_client.id
             try:
                 sub_token_existing = None
                 for attr in ("subId", "subscription", "sub_id"):
-                    if hasattr(inbound_to_modify.settings.clients[client_index], attr):
-                        sub_token_existing = getattr(inbound_to_modify.settings.clients[client_index], attr)
+                    if hasattr(existing_client, attr):
+                        sub_token_existing = getattr(existing_client, attr)
                         break
                 if not sub_token_existing:
                     import secrets
                     client_sub_token = secrets.token_hex(12)
                     for attr in ("subId", "subscription", "sub_id"):
                         try:
-                            setattr(inbound_to_modify.settings.clients[client_index], attr, client_sub_token)
+                            setattr(existing_client, attr, client_sub_token)
                         except Exception:
                             pass
             except Exception:
@@ -160,9 +170,9 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
 
     except Exception as e:
         logger.error(f"Error in update_or_create_client_on_panel: {e}", exc_info=True)
-        return None, None
+        return None, None, None
 
-async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: int) -> Dict | None:
+async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: int | None = None, expiry_timestamp_ms: int | None = None) -> Dict | None:
     host_data = get_host(host_name)
     if not host_data:
         logger.error(f"Workflow failed: Host '{host_name}' not found in the database.")
@@ -178,7 +188,11 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
         logger.error(f"Workflow failed: Could not log in or find inbound on host '{host_name}'.")
         return None
         
-    client_uuid, new_expiry_ms, client_sub_token = update_or_create_client_on_panel(api, inbound.id, email, days_to_add)
+    # Prefer exact expiry when provided (e.g., switching hosts), otherwise add days (purchase/extend/trial)
+    client_uuid, new_expiry_ms, client_sub_token = update_or_create_client_on_panel(
+        api, inbound.id, email, days_to_add=days_to_add, target_expiry_ms=expiry_timestamp_ms
+    )
+
     if not client_uuid:
         logger.error(f"Workflow failed: Could not create/update client '{email}' on host '{host_name}'.")
         return None
