@@ -24,6 +24,7 @@ from pytonconnect import TonConnect
 from pytonconnect.exceptions import UserRejectsError
 
 from aiogram import Bot, Router, F, types, html
+from aiogram.types import BufferedInputFile
 from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
@@ -74,6 +75,10 @@ class PaymentProcess(StatesGroup):
     waiting_for_payment_method = State()
 
  
+class TopUpProcess(StatesGroup):
+    waiting_for_amount = State()
+    waiting_for_topup_method = State()
+
 
 class SupportDialog(StatesGroup):
     waiting_for_subject = State()
@@ -278,7 +283,179 @@ def get_user_router() -> Router:
         )
         await callback.message.edit_text(final_text, reply_markup=keyboards.create_profile_keyboard())
 
-    
+    @user_router.callback_query(F.data == "top_up_start")
+    @registration_required
+    async def topup_start_handler(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer()
+        await callback.message.edit_text(
+            "Введите сумму пополнения в рублях (например, 300):\nМинимум: 10 RUB, максимум: 100000 RUB",
+        )
+        await state.set_state(TopUpProcess.waiting_for_amount)
+
+    @user_router.message(TopUpProcess.waiting_for_amount)
+    async def topup_amount_input(message: types.Message, state: FSMContext):
+        text = (message.text or "").replace(",", ".").strip()
+        try:
+            amount = Decimal(text)
+        except Exception:
+            await message.answer("❌ Введите корректную сумму, например: 300")
+            return
+        if amount <= 0:
+            await message.answer("❌ Сумма должна быть положительной")
+            return
+        if amount < Decimal("10"):
+            await message.answer("❌ Минимальная сумма пополнения: 10 RUB")
+            return
+        if amount > Decimal("100000"):
+            await message.answer("❌ Максимальная сумма пополнения: 100000 RUB")
+            return
+        final_amount = amount.quantize(Decimal("0.01"))
+        await state.update_data(topup_amount=float(final_amount))
+        await message.answer(
+            f"К пополнению: {final_amount:.2f} RUB\nВыберите способ оплаты:",
+            reply_markup=keyboards.create_topup_payment_method_keyboard(PAYMENT_METHODS)
+        )
+        await state.set_state(TopUpProcess.waiting_for_topup_method)
+
+    @user_router.callback_query(TopUpProcess.waiting_for_topup_method, F.data == "topup_pay_yookassa")
+    async def topup_pay_yookassa(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer("Создаю ссылку на оплату...")
+        data = await state.get_data()
+        amount = Decimal(str(data.get('topup_amount', 0)))
+        if amount <= 0:
+            await callback.message.edit_text("❌ Некорректная сумма пополнения. Повторите ввод.")
+            await state.clear()
+            return
+        user_id = callback.from_user.id
+        price_str_for_api = f"{amount:.2f}"
+        price_float_for_metadata = float(amount)
+
+        try:
+            payment_payload = {
+                "amount": {"value": price_str_for_api, "currency": "RUB"},
+                "confirmation": {"type": "redirect", "return_url": f"https://t.me/{TELEGRAM_BOT_USERNAME}"},
+                "capture": True,
+                "description": f"Пополнение баланса на {price_str_for_api} RUB",
+                "metadata": {
+                    "user_id": user_id,
+                    "price": price_float_for_metadata,
+                    "action": "top_up",
+                    "payment_method": "YooKassa"
+                }
+            }
+            payment = Payment.create(payment_payload, uuid.uuid4())
+            await state.clear()
+            await callback.message.edit_text(
+                "Нажмите на кнопку ниже для оплаты:",
+                reply_markup=keyboards.create_payment_keyboard(payment.confirmation.confirmation_url)
+            )
+        except Exception as e:
+            logger.error(f"Failed to create YooKassa topup payment: {e}", exc_info=True)
+            await callback.message.answer("Не удалось создать ссылку на оплату.")
+            await state.clear()
+
+    @user_router.callback_query(TopUpProcess.waiting_for_topup_method, (F.data == "topup_pay_cryptobot") | (F.data == "topup_pay_heleket"))
+    async def topup_pay_heleket_like(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer("Создаю счёт...")
+        data = await state.get_data()
+        user_id = callback.from_user.id
+        amount = float(data.get('topup_amount', 0))
+        if amount <= 0:
+            await callback.message.edit_text("❌ Некорректная сумма пополнения. Повторите ввод.")
+            await state.clear()
+            return
+        # Сформируем state_data минимально необходимым
+        state_data = {
+            "action": "top_up",
+            "customer_email": None,
+            "plan_id": None,
+            "host_name": None,
+            "key_id": None,
+        }
+        try:
+            pay_url = await _create_heleket_payment_request(
+                user_id=user_id,
+                price=float(amount),
+                months=0,
+                host_name="",
+                state_data=state_data
+            )
+            if pay_url:
+                await callback.message.edit_text(
+                    "Нажмите на кнопку ниже для оплаты:",
+                    reply_markup=keyboards.create_payment_keyboard(pay_url)
+                )
+                await state.clear()
+            else:
+                await callback.message.edit_text("❌ Не удалось создать счёт. Попробуйте другой способ оплаты.")
+        except Exception as e:
+            logger.error(f"Failed to create topup Heleket-like invoice: {e}", exc_info=True)
+            await callback.message.edit_text("❌ Не удалось создать счёт. Попробуйте другой способ оплаты.")
+            await state.clear()
+
+    @user_router.callback_query(TopUpProcess.waiting_for_topup_method, F.data == "topup_pay_tonconnect")
+    async def topup_pay_tonconnect(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer("Готовлю TON Connect...")
+        data = await state.get_data()
+        user_id = callback.from_user.id
+        amount_rub = Decimal(str(data.get('topup_amount', 0)))
+        if amount_rub <= 0:
+            await callback.message.edit_text("❌ Некорректная сумма пополнения. Повторите ввод.")
+            await state.clear()
+            return
+
+        wallet_address = get_setting("ton_wallet_address")
+        if not wallet_address:
+            await callback.message.edit_text("❌ Оплата через TON временно недоступна.")
+            await state.clear()
+            return
+
+        usdt_rub_rate = await get_usdt_rub_rate()
+        ton_usdt_rate = await get_ton_usdt_rate()
+        if not usdt_rub_rate or not ton_usdt_rate:
+            await callback.message.edit_text("❌ Не удалось получить курс TON. Попробуйте позже.")
+            await state.clear()
+            return
+
+        price_ton = (amount_rub / usdt_rub_rate / ton_usdt_rate).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+        amount_nanoton = int(price_ton * 1_000_000_000)
+
+        payment_id = str(uuid.uuid4())
+        metadata = {
+            "user_id": user_id,
+            "price": float(amount_rub),
+            "action": "top_up",
+            "payment_method": "TON Connect"
+        }
+        create_pending_transaction(payment_id, user_id, float(amount_rub), metadata)
+
+        transaction_payload = {
+            'messages': [{'address': wallet_address, 'amount': str(amount_nanoton), 'payload': payment_id}],
+            'valid_until': int(datetime.now().timestamp()) + 600
+        }
+
+        try:
+            connect_url = await _start_ton_connect_process(user_id, transaction_payload)
+            qr_img = qrcode.make(connect_url)
+            bio = BytesIO(); qr_img.save(bio, "PNG"); qr_file = BufferedInputFile(bio.getvalue(), "ton_qr.png")
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer_photo(
+                photo=qr_file,
+                caption=(
+                    f"💎 Оплата через TON Connect\n\n"
+                    f"Сумма к оплате: `{price_ton}` TON\n\n"
+                    f"Нажмите кнопку ниже, чтобы открыть кошелёк и подтвердить перевод."
+                ),
+                reply_markup=keyboards.create_ton_connect_keyboard(connect_url)
+            )
+            await state.clear()
+        except Exception as e:
+            logger.error(f"Failed to start TON Connect topup: {e}", exc_info=True)
+            await callback.message.edit_text("❌ Не удалось подготовить оплату TON Connect.")
+            await state.clear()
 
     @user_router.callback_query(F.data == "show_referral_program")
     @registration_required
@@ -1421,13 +1598,14 @@ async def notify_admin_of_purchase(bot: Bot, metadata: dict):
 
 async def process_successful_payment(bot: Bot, metadata: dict):
     try:
-        user_id = int(metadata['user_id'])
-        months = int(metadata['months'])
-        price = float(metadata['price'])
-        action = metadata['action']
-        key_id = int(metadata['key_id'])
-        host_name = metadata['host_name']
-        plan_id = int(metadata['plan_id'])
+        action = metadata.get('action')
+        user_id = int(metadata.get('user_id'))
+        price = float(metadata.get('price'))
+        # Поля ниже нужны только для покупок ключей/продлений
+        months = int(metadata.get('months', 0))
+        key_id = int(metadata.get('key_id', 0)) if metadata.get('key_id') is not None else 0
+        host_name = metadata.get('host_name', '')
+        plan_id = int(metadata.get('plan_id', 0)) if metadata.get('plan_id') is not None else 0
         customer_email = metadata.get('customer_email')
         payment_method = metadata.get('payment_method')
 
@@ -1443,6 +1621,69 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             await bot.delete_message(chat_id=chat_id_to_delete, message_id=message_id_to_delete)
         except TelegramBadRequest as e:
             logger.warning(f"Could not delete payment message: {e}")
+
+    # Спец-ветка: пополнение баланса
+    if action == "top_up":
+        try:
+            ok = add_to_balance(user_id, float(price))
+        except Exception as e:
+            logger.error(f"Failed to add to balance for user {user_id}: {e}", exc_info=True)
+            ok = False
+        # Лог транзакции
+        try:
+            user_info = get_user(user_id)
+            log_username = user_info.get('username', 'N/A') if user_info else 'N/A'
+            log_transaction(
+                username=log_username,
+                transaction_id=None,
+                payment_id=str(uuid.uuid4()),
+                user_id=user_id,
+                status='paid',
+                amount_rub=float(price),
+                amount_currency=None,
+                currency_name=None,
+                payment_method=payment_method or 'Unknown',
+                metadata=json.dumps({"action": "top_up"})
+            )
+        except Exception:
+            pass
+        try:
+            current_balance = 0.0
+            try:
+                current_balance = float(get_balance(user_id))
+            except Exception:
+                pass
+            if ok:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=(
+                        f"✅ Оплата получена!\n"
+                        f"💼 Баланс пополнен на {float(price):.2f} RUB.\n"
+                        f"Текущий баланс: {current_balance:.2f} RUB."
+                    ),
+                    reply_markup=keyboards.create_profile_keyboard()
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=(
+                        "⚠️ Оплата получена, но не удалось обновить баланс. "
+                        "Обратитесь в поддержку."
+                    ),
+                    reply_markup=keyboards.create_support_keyboard()
+                )
+        except Exception:
+            pass
+        # Админ-уведомление о пополнении (по возможности)
+        try:
+            admins = [u for u in (get_all_users() or []) if is_admin(u.get('telegram_id') or 0)]
+            for a in admins:
+                admin_id = a.get('telegram_id')
+                if admin_id:
+                    await bot.send_message(admin_id, f"📥 Пополнение: пользователь {user_id}, сумма {float(price):.2f} RUB")
+        except Exception:
+            pass
+        return
 
     processing_message = await bot.send_message(
         chat_id=user_id,

@@ -138,6 +138,7 @@ def get_admin_router() -> Router:
             user_tag = f"<a href='tg://user?id={user_id}'>Профиль</a>"
         is_banned = user.get('is_banned', False)
         total_spent = user.get('total_spent', 0)
+        balance = user.get('balance', 0)
         referred_by = user.get('referred_by')
         keys = get_keys_for_user(user_id)
         keys_count = len(keys)
@@ -145,6 +146,7 @@ def get_admin_router() -> Router:
             f"👤 <b>Пользователь {user_id}</b>\n\n"
             f"Имя пользователя: {user_tag}\n"
             f"Всего потратил: {float(total_spent):.2f} RUB\n"
+            f"Баланс: {float(balance):.2f} RUB\n"
             f"Забанен: {'да' if is_banned else 'нет'}\n"
             f"Приглашён: {referred_by if referred_by else '—'}\n"
             f"Ключей: {keys_count}"
@@ -189,6 +191,7 @@ def get_admin_router() -> Router:
         else:
             user_tag = f"<a href='tg://user?id={user_id}'>Профиль</a>"
         total_spent = user.get('total_spent', 0)
+        balance = user.get('balance', 0)
         referred_by = user.get('referred_by')
         keys = get_keys_for_user(user_id)
         keys_count = len(keys)
@@ -196,6 +199,7 @@ def get_admin_router() -> Router:
             f"👤 <b>Пользователь {user_id}</b>\n\n"
             f"Имя пользователя: {user_tag}\n"
             f"Всего потратил: {float(total_spent):.2f} RUB\n"
+            f"Баланс: {float(balance):.2f} RUB\n"
             f"Забанен: да\n"
             f"Приглашён: {referred_by if referred_by else '—'}\n"
             f"Ключей: {keys_count}"
@@ -239,6 +243,7 @@ def get_admin_router() -> Router:
         else:
             user_tag = f"<a href='tg://user?id={user_id}'>Профиль</a>"
         total_spent = user.get('total_spent', 0)
+        balance = user.get('balance', 0)
         referred_by = user.get('referred_by')
         keys = get_keys_for_user(user_id)
         keys_count = len(keys)
@@ -246,6 +251,7 @@ def get_admin_router() -> Router:
             f"👤 <b>Пользователь {user_id}</b>\n\n"
             f"Имя пользователя: {user_tag}\n"
             f"Всего потратил: {float(total_spent):.2f} RUB\n"
+            f"Баланс: {float(balance):.2f} RUB\n"
             f"Забанен: нет\n"
             f"Приглашён: {referred_by if referred_by else '—'}\n"
             f"Ключей: {keys_count}"

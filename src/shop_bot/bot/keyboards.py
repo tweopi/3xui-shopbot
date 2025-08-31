@@ -307,6 +307,25 @@ def create_payment_keyboard(payment_url: str) -> InlineKeyboardMarkup:
     builder.button(text="Перейти к оплате", url=payment_url)
     return builder.as_markup()
 
+def create_topup_payment_method_keyboard(payment_methods: dict) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    # Только внешние способы оплаты, без оплаты с баланса
+    if payment_methods and payment_methods.get("yookassa"):
+        if get_setting("sbp_enabled"):
+            builder.button(text="🏦 СБП / Банковская карта", callback_data="topup_pay_yookassa")
+        else:
+            builder.button(text="🏦 Банковская карта", callback_data="topup_pay_yookassa")
+    if payment_methods and payment_methods.get("heleket"):
+        builder.button(text="💎 Криптовалюта", callback_data="topup_pay_heleket")
+    if payment_methods and payment_methods.get("cryptobot"):
+        builder.button(text="🤖 CryptoBot", callback_data="topup_pay_cryptobot")
+    if payment_methods and payment_methods.get("tonconnect"):
+        builder.button(text="🪙 TON Connect", callback_data="topup_pay_tonconnect")
+
+    builder.button(text="⬅️ Назад", callback_data="show_profile")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def create_keys_management_keyboard(keys: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if keys:
@@ -358,6 +377,7 @@ def create_back_to_menu_keyboard() -> InlineKeyboardMarkup:
 
 def create_profile_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Пополнить баланс", callback_data="top_up_start")
     builder.button(text="🤝 Реферальная программа", callback_data="show_referral_program")
     builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
     builder.adjust(1)
