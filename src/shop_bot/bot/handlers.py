@@ -331,6 +331,20 @@ def get_user_router() -> Router:
         price_float_for_metadata = float(amount)
 
         try:
+            # Сформируем чек, если указан email для чеков
+            customer_email = get_setting("receipt_email")
+            receipt = None
+            if customer_email and is_valid_email(customer_email):
+                receipt = {
+                    "customer": {"email": customer_email},
+                    "items": [{
+                        "description": f"Пополнение баланса",
+                        "quantity": "1.00",
+                        "amount": {"value": price_str_for_api, "currency": "RUB"},
+                        "vat_code": "1"
+                    }]
+                }
+
             payment_payload = {
                 "amount": {"value": price_str_for_api, "currency": "RUB"},
                 "confirmation": {"type": "redirect", "return_url": f"https://t.me/{TELEGRAM_BOT_USERNAME}"},
@@ -343,6 +357,8 @@ def get_user_router() -> Router:
                     "payment_method": "YooKassa"
                 }
             }
+            if receipt:
+                payment_payload['receipt'] = receipt
             payment = Payment.create(payment_payload, uuid.uuid4())
             await state.clear()
             await callback.message.edit_text(
