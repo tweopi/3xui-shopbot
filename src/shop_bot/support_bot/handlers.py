@@ -18,6 +18,8 @@ from shop_bot.data_manager.database import (
     get_ticket_by_thread,
     update_ticket_subject,
     delete_ticket,
+    is_admin,
+    get_admin_ids,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,11 +80,7 @@ def get_support_router() -> Router:
         return types.InlineKeyboardMarkup(inline_keyboard=inline_kb)
 
     async def _is_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
-        try:
-            admin_setting = get_setting("admin_telegram_id")
-            is_admin_by_setting = admin_setting and int(admin_setting) == user_id
-        except Exception:
-            is_admin_by_setting = False
+        is_admin_by_setting = is_admin(user_id)
         is_admin_in_chat = False
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
@@ -222,21 +220,24 @@ def get_support_router() -> Router:
                 f"✉️ Сообщение добавлено в ваш открытый тикет #{ticket_id}.",
                 reply_markup=_user_main_reply_kb()
             )
-        admin_id = get_setting("admin_telegram_id")
-        if admin_id:
-            try:
-                await bot.send_message(
-                    int(admin_id),
-                    (
-                        "🆘 Новое обращение в поддержку\n"
-                        f"ID тикета: #{ticket_id}\n"
-                        f"От пользователя: @{message.from_user.username or message.from_user.full_name} (ID: {user_id})\n"
-                        f"Тема: {subject or '—'}\n\n"
-                        f"Сообщение:\n{message.text or ''}"
+        # Уведомить всех администраторов
+        try:
+            for aid in get_admin_ids():
+                try:
+                    await bot.send_message(
+                        int(aid),
+                        (
+                            "🆘 Новое обращение в поддержку\n"
+                            f"ID тикета: #{ticket_id}\n"
+                            f"От пользователя: @{message.from_user.username or message.from_user.full_name} (ID: {user_id})\n"
+                            f"Тема: {subject or '—'}\n\n"
+                            f"Сообщение:\n{message.text or ''}"
+                        )
                     )
-                )
-            except Exception as e:
-                logger.warning(f"Failed to notify admin about ticket {ticket_id}: {e}")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Failed to notify admins about ticket {ticket_id}: {e}")
 
     @router.callback_query(F.data == "support_my_tickets")
     async def support_my_tickets_handler(callback: types.CallbackQuery):
@@ -419,11 +420,8 @@ def get_support_router() -> Router:
             me = await bot.get_me()
             if message.from_user and message.from_user.id == me.id:
                 return
-            try:
-                admin_setting = get_setting("admin_telegram_id")
-                is_admin_by_setting = admin_setting and int(admin_setting) == message.from_user.id
-            except Exception:
-                is_admin_by_setting = False
+            # многоадминная проверка
+            is_admin_by_setting = is_admin(message.from_user.id)
             is_admin_in_chat = False
             try:
                 member = await bot.get_chat_member(chat_id=forum_chat_id, user_id=message.from_user.id)

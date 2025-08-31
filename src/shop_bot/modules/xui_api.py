@@ -119,9 +119,11 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
         client_sub_token: str | None = None
 
         if client_index != -1:
-            # Keep traffic reset logic only when days_to_add provided
-            if days_to_add is not None:
-                inbound_to_modify.settings.clients[client_index].reset = days_to_add
+            # Disable auto-reset/auto-renew on extension
+            try:
+                inbound_to_modify.settings.clients[client_index].reset = 0
+            except Exception:
+                pass
             inbound_to_modify.settings.clients[client_index].enable = True
             inbound_to_modify.settings.clients[client_index].expiry_time = new_expiry_ms
 
@@ -152,6 +154,12 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
                 flow="xtls-rprx-vision",
                 expiry_time=new_expiry_ms
             )
+            # Ensure no auto-reset/auto-renew for new clients
+            try:
+                setattr(new_client, "reset", 0)
+            except Exception:
+                pass
+
             try:
                 import secrets
                 client_sub_token = secrets.token_hex(12)

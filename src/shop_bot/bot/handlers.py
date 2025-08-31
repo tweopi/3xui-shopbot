@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 import qrcode
 import aiohttp
@@ -24,7 +25,6 @@ from pytonconnect.exceptions import UserRejectsError
 
 from aiogram import Bot, Router, F, types, html
 from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
-from aiogram.types import BufferedInputFile
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -38,12 +38,16 @@ from shop_bot.data_manager.database import (
     register_user_if_not_exists, get_next_key_number, get_key_by_id,
     update_key_info, set_trial_used, set_terms_agreed, get_setting, get_all_hosts,
     get_plans_for_host, get_plan_by_id, log_transaction, get_referral_count,
-    add_to_referral_balance, create_pending_transaction, get_all_users,
-    set_referral_balance, set_referral_balance_all,
+    create_pending_transaction, get_all_users,
     create_support_ticket, add_support_message, get_user_tickets,
     get_ticket, get_ticket_messages, set_ticket_status, update_ticket_thread_info,
     get_ticket_by_thread,
-    update_key_host_and_info
+    update_key_host_and_info,
+    get_balance, deduct_from_balance,
+    get_key_by_email, add_to_balance,
+    add_to_referral_balance_all, get_referral_balance_all,
+    get_referral_balance,
+    is_admin,
 )
 
 from shop_bot.config import (
@@ -53,12 +57,10 @@ from shop_bot.config import (
 
 TELEGRAM_BOT_USERNAME = None
 PAYMENT_METHODS = None
-ADMIN_ID = None
+ADMIN_ID = None  # устаревшее: используйте is_admin()
 CRYPTO_BOT_TOKEN = get_setting("cryptobot_token")
 
 logger = logging.getLogger(__name__)
-admin_router = Router()
-user_router = Router()
 
 class KeyPurchase(StatesGroup):
     waiting_for_host_selection = State()
@@ -71,15 +73,7 @@ class PaymentProcess(StatesGroup):
     waiting_for_email = State()
     waiting_for_payment_method = State()
 
-class Broadcast(StatesGroup):
-    waiting_for_message = State()
-    waiting_for_button_option = State()
-    waiting_for_button_text = State()
-    waiting_for_button_url = State()
-    waiting_for_confirmation = State()
-
-class WithdrawStates(StatesGroup):
-    waiting_for_details = State()
+ 
 
 class SupportDialog(StatesGroup):
     waiting_for_subject = State()
@@ -96,11 +90,11 @@ async def show_main_menu(message: types.Message, edit_message: bool = False):
     user_keys = get_user_keys(user_id)
     
     trial_available = not (user_db_data and user_db_data.get('trial_used'))
-    is_admin = str(user_id) == ADMIN_ID
+    is_admin_flag = is_admin(user_id)
 
     text = "🏠 <b>Главное меню</b>\n\nВыберите действие:"
-    keyboard = keyboards.create_main_menu_keyboard(user_keys, trial_available, is_admin)
-    
+    keyboard = keyboards.create_main_menu_keyboard(user_keys, trial_available, is_admin_flag)
+    # Отправляем только текст без фотографии
     if edit_message:
         try:
             await message.edit_text(text, reply_markup=keyboard)
@@ -263,165 +257,28 @@ def get_user_router() -> Router:
         elif user_keys: vpn_status_text = VPN_INACTIVE_TEXT
         else: vpn_status_text = VPN_NO_DATA_TEXT
         final_text = get_profile_text(username, total_spent, total_months, vpn_status_text)
-        await callback.message.edit_text(final_text, reply_markup=keyboards.create_back_to_menu_keyboard())
-
-    @user_router.callback_query(F.data == "start_broadcast")
-    @registration_required
-    async def start_broadcast_handler(callback: types.CallbackQuery, state: FSMContext):
-        if str(callback.from_user.id) != ADMIN_ID:
-            await callback.answer("У вас нет прав.", show_alert=True)
-            return
-        
-        await callback.answer()
-        await callback.message.edit_text(
-            "Пришлите сообщение, которое вы хотите разослать всем пользователям.\n"
-            "Вы можете использовать форматирование (<b>жирный</b>, <i>курсив</i>).\n"
-            "Также поддерживаются фото, видео и документы.\n",
-            reply_markup=keyboards.create_broadcast_cancel_keyboard()
+        # Баланс: основной + реферальные метрики
+        try:
+            main_balance = get_balance(user_id)
+        except Exception:
+            main_balance = 0.0
+        final_text += f"\n\n💼 <b>Основной баланс:</b> {main_balance:.0f} RUB"
+        # Реферальная информация
+        try:
+            referral_count = get_referral_count(user_id)
+        except Exception:
+            referral_count = 0
+        try:
+            total_ref_earned = float(get_referral_balance_all(user_id))
+        except Exception:
+            total_ref_earned = 0.0
+        final_text += (
+            f"\n🤝 <b>Рефералы:</b> {referral_count}"
+            f"\n💰 <b>Заработано по рефералке (всего):</b> {total_ref_earned:.2f} RUB"
         )
-        await state.set_state(Broadcast.waiting_for_message)
+        await callback.message.edit_text(final_text, reply_markup=keyboards.create_profile_keyboard())
 
-    @user_router.message(Broadcast.waiting_for_message)
-    async def broadcast_message_received_handler(message: types.Message, state: FSMContext):
-        await state.update_data(message_to_send=message.model_dump_json())
-        
-        await message.answer(
-            "Сообщение получено. Хотите добавить к нему кнопку со ссылкой?",
-            reply_markup=keyboards.create_broadcast_options_keyboard()
-        )
-        await state.set_state(Broadcast.waiting_for_button_option)
-
-    @user_router.callback_query(Broadcast.waiting_for_button_option, F.data == "broadcast_add_button")
-    async def add_button_prompt_handler(callback: types.CallbackQuery, state: FSMContext):
-        await callback.answer()
-        await callback.message.edit_text(
-            "Хорошо. Теперь отправьте мне текст для кнопки.",
-            reply_markup=keyboards.create_broadcast_cancel_keyboard()
-        )
-        await state.set_state(Broadcast.waiting_for_button_text)
-
-    @user_router.message(Broadcast.waiting_for_button_text)
-    async def button_text_received_handler(message: types.Message, state: FSMContext):
-        await state.update_data(button_text=message.text)
-        await message.answer(
-            "Текст кнопки получен. Теперь отправьте ссылку (URL), куда она будет вести.",
-            reply_markup=keyboards.create_broadcast_cancel_keyboard()
-        )
-        await state.set_state(Broadcast.waiting_for_button_url)
-
-    @user_router.message(Broadcast.waiting_for_button_url)
-    async def button_url_received_handler(message: types.Message, state: FSMContext, bot: Bot):
-        url_to_check = message.text
-
-        is_valid = await is_url_reachable(url_to_check)
-        
-        if not is_valid:
-            await message.answer(
-                "❌ **Ссылка не прошла проверку.**\n\n"
-                "Пожалуйста, убедитесь, что:\n"
-                "1. Ссылка начинается с `http://` или `https://`.\n"
-                "2. Доменное имя корректно (например, `example.com`).\n"
-                "3. Сайт доступен в данный момент.\n\n"
-                "Попробуйте еще раз."
-            )
-            return
-
-        await state.update_data(button_url=url_to_check)
-        await show_broadcast_preview(message, state, bot)
-
-    @user_router.callback_query(Broadcast.waiting_for_button_option, F.data == "broadcast_skip_button")
-    async def skip_button_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
-        await callback.answer()
-        await state.update_data(button_text=None, button_url=None)
-        await show_broadcast_preview(callback.message, state, bot)
-
-    async def show_broadcast_preview(message: types.Message, state: FSMContext, bot: Bot):
-        data = await state.get_data()
-        message_json = data.get('message_to_send')
-        original_message = types.Message.model_validate_json(message_json)
-        
-        button_text = data.get('button_text')
-        button_url = data.get('button_url')
-        
-        preview_keyboard = None
-        if button_text and button_url:
-            builder = InlineKeyboardBuilder()
-            builder.button(text=button_text, url=button_url)
-            preview_keyboard = builder.as_markup()
-
-        await message.answer(
-            "Вот так будет выглядеть ваше сообщение. Отправляем?",
-            reply_markup=keyboards.create_broadcast_confirmation_keyboard()
-        )
-        
-        await bot.copy_message(
-            chat_id=message.chat.id,
-            from_chat_id=original_message.chat.id,
-            message_id=original_message.message_id,
-            reply_markup=preview_keyboard
-        )
-
-        await state.set_state(Broadcast.waiting_for_confirmation)
-
-    @user_router.callback_query(Broadcast.waiting_for_confirmation, F.data == "confirm_broadcast")
-    async def confirm_broadcast_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
-        await callback.message.edit_text("⏳ Начинаю рассылку... Это может занять некоторое время.")
-        
-        data = await state.get_data()
-        message_json = data.get('message_to_send')
-        original_message = types.Message.model_validate_json(message_json)
-        
-        button_text = data.get('button_text')
-        button_url = data.get('button_url')
-        
-        final_keyboard = None
-        if button_text and button_url:
-            builder = InlineKeyboardBuilder()
-            builder.button(text=button_text, url=button_url)
-            final_keyboard = builder.as_markup()
-
-        await state.clear()
-        
-        users = get_all_users()
-        logger.info(f"Broadcast: Starting to iterate over {len(users)} users.")
-
-        sent_count = 0
-        failed_count = 0
-        banned_count = 0
-
-        for user in users:
-            user_id = user['telegram_id']
-            if user.get('is_banned'):
-                banned_count += 1
-                continue
-            
-            try:
-                await bot.copy_message(
-                    chat_id=user_id,
-                    from_chat_id=original_message.chat.id,
-                    message_id=original_message.message_id,
-                    reply_markup=final_keyboard
-                )
-
-                sent_count += 1
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                failed_count += 1
-                logger.warning(f"Failed to send broadcast message to user {user_id}: {e}")
-        
-        await callback.message.answer(
-            f"✅ Рассылка завершена!\n\n"
-            f"👍 Отправлено: {sent_count}\n"
-            f"👎 Не удалось отправить: {failed_count}\n"
-            f"🚫 Пропущено (забанены): {banned_count}"
-        )
-        await show_main_menu(callback.message)
-
-    @user_router.callback_query(StateFilter(Broadcast), F.data == "cancel_broadcast")
-    async def cancel_broadcast_handler(callback: types.CallbackQuery, state: FSMContext):
-        await callback.answer("Рассылка отменена.")
-        await state.clear()
-        await show_main_menu(callback.message, edit_message=True)
+    
 
     @user_router.callback_query(F.data == "show_referral_program")
     @registration_required
@@ -433,93 +290,23 @@ def get_user_router() -> Router:
         
         referral_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
         referral_count = get_referral_count(user_id)
-        balance = user_data.get('referral_balance', 0)
-
+        try:
+            total_ref_earned = float(get_referral_balance_all(user_id))
+        except Exception:
+            total_ref_earned = 0.0
         text = (
             "🤝 <b>Реферальная программа</b>\n\n"
-            "Приглашайте друзей и получайте вознаграждение с <b>каждой</b> их покупки!\n\n"
             f"<b>Ваша реферальная ссылка:</b>\n<code>{referral_link}</code>\n\n"
             f"<b>Приглашено пользователей:</b> {referral_count}\n"
-            f"<b>Ваш баланс:</b> {balance:.2f} RUB"
+            f"<b>Заработано по рефералке:</b> {total_ref_earned:.2f} RUB"
         )
 
         builder = InlineKeyboardBuilder()
-        if balance >= 100:
-            builder.button(text="💸 Оставить заявку на вывод", callback_data="withdraw_request")
         builder.button(text="⬅️ Назад", callback_data="back_to_main_menu")
         await callback.message.edit_text(
             text, reply_markup=builder.as_markup()
         )
 
-    @user_router.callback_query(F.data == "withdraw_request")
-    @registration_required
-    async def withdraw_request_handler(callback: types.CallbackQuery, state: FSMContext):
-        await callback.answer()
-        await callback.message.edit_text(
-            "Пожалуйста, отправьте ваши реквизиты для вывода (номер карты или номер телефона и банк):"
-        )
-        await state.set_state(WithdrawStates.waiting_for_details)
-
-    @user_router.message(WithdrawStates.waiting_for_details)
-    @registration_required
-    async def process_withdraw_details(message: types.Message, state: FSMContext):
-        user_id = message.from_user.id
-        user = get_user(user_id)
-        balance = user.get('referral_balance', 0)
-        details = message.text.strip()
-        if balance < 100:
-            await message.answer("❌ Ваш баланс менее 100 руб. Вывод недоступен.")
-            await state.clear()
-            return
-
-        admin_id = int(get_setting("admin_telegram_id"))
-        text = (
-            f"💸 <b>Заявка на вывод реферальных средств</b>\n"
-            f"👤 Пользователь: @{user.get('username', 'N/A')} (ID: <code>{user_id}</code>)\n"
-            f"💰 Сумма: <b>{balance:.2f} RUB</b>\n"
-            f"📄 Реквизиты: <code>{details}</code>\n\n"
-            f"/approve_withdraw_{user_id} /decline_withdraw_{user_id}"
-        )
-        await message.answer("Ваша заявка отправлена администратору. Ожидайте ответа.")
-        await message.bot.send_message(admin_id, text, parse_mode="HTML")
-        await state.clear()
-
-    @user_router.message(Command(commands=["approve_withdraw"]))
-    async def approve_withdraw_handler(message: types.Message):
-        admin_id = int(get_setting("admin_telegram_id"))
-        if message.from_user.id != admin_id:
-            return
-        try:
-            user_id = int(message.text.split("_")[-1])
-            user = get_user(user_id)
-            balance = user.get('referral_balance', 0)
-            if balance < 100:
-                await message.answer("Баланс пользователя менее 100 руб.")
-                return
-            set_referral_balance(user_id, 0)
-            set_referral_balance_all(user_id, 0)
-            await message.answer(f"✅ Выплата {balance:.2f} RUB пользователю {user_id} подтверждена.")
-            await message.bot.send_message(
-                user_id,
-                f"✅ Ваша заявка на вывод {balance:.2f} RUB одобрена. Деньги будут переведены в ближайшее время."
-            )
-        except Exception as e:
-            await message.answer(f"Ошибка: {e}")
-
-    @user_router.message(Command(commands=["decline_withdraw"]))
-    async def decline_withdraw_handler(message: types.Message):
-        admin_id = int(get_setting("admin_telegram_id"))
-        if message.from_user.id != admin_id:
-            return
-        try:
-            user_id = int(message.text.split("_")[-1])
-            await message.answer(f"❌ Заявка пользователя {user_id} отклонена.")
-            await message.bot.send_message(
-                user_id,
-                "❌ Ваша заявка на вывод отклонена. Проверьте корректность реквизитов и попробуйте снова."
-            )
-        except Exception as e:
-            await message.answer(f"Ошибка: {e}")
 
     @user_router.callback_query(F.data == "show_about")
     @registration_required
@@ -712,11 +499,8 @@ def get_user_router() -> Router:
             user_id = int(ticket.get('user_id'))
             if message.from_user and message.from_user.id == me.id:
                 return
-            try:
-                admin_setting = get_setting("admin_telegram_id")
-                is_admin_by_setting = admin_setting and int(admin_setting) == message.from_user.id
-            except Exception:
-                is_admin_by_setting = False
+            # Проверка многоадминная
+            is_admin_by_setting = is_admin(message.from_user.id)
             is_admin_in_chat = False
             try:
                 member = await bot.get_chat_member(chat_id=forum_chat_id, user_id=message.from_user.id)
@@ -805,9 +589,27 @@ def get_user_router() -> Router:
         await message.edit_text(f"Отлично! Создаю для вас бесплатный ключ на {get_setting('trial_duration_days')} дня на сервере \"{host_name}\"...")
 
         try:
+            # email: trial_{username}@bot.local с авто-суффиксом при коллизиях
+            user_data = get_user(user_id) or {}
+            raw_username = (user_data.get('username') or f'user{user_id}').lower()
+            username_slug = re.sub(r"[^a-z0-9._-]", "_", raw_username).strip("_")[:16] or f"user{user_id}"
+            base_local = f"trial_{username_slug}"
+            candidate_local = base_local
+            attempt = 1
+            while True:
+                candidate_email = f"{candidate_local}@bot.local"
+                if not get_key_by_email(candidate_email):
+                    break
+                attempt += 1
+                candidate_local = f"{base_local}-{attempt}"
+                if attempt > 100:
+                    candidate_local = f"{base_local}-{int(datetime.now().timestamp())}"
+                    candidate_email = f"{candidate_local}@bot.local"
+                    break
+
             result = await xui_api.create_or_update_key_on_host(
                 host_name=host_name,
-                email=f"user{user_id}-key{get_next_key_number(user_id)}-trial@telegram.bot",
+                email=candidate_email,
                 days_to_add=int(get_setting("trial_duration_days"))
             )
             if not result:
@@ -1242,17 +1044,9 @@ def get_user_router() -> Router:
             await state.update_data(customer_email=message.text)
             await message.answer(f"✅ Email принят: {message.text}")
 
-            data = await state.get_data()
-            await message.answer(
-                CHOOSE_PAYMENT_METHOD_MESSAGE,
-                reply_markup=keyboards.create_payment_method_keyboard(
-                    payment_methods=PAYMENT_METHODS,
-                    action=data.get('action'),
-                    key_id=data.get('key_id')
-                )
-            )
-            await state.set_state(PaymentProcess.waiting_for_payment_method)
-            logger.info(f"User {message.chat.id}: State set to waiting_for_payment_method")
+            # Показываем опции оплаты с учетом балансов и цены
+            await show_payment_options(message, state)
+            logger.info(f"User {message.chat.id}: State set to waiting_for_payment_method via show_payment_options")
         else:
             await message.answer("❌ Неверный формат email. Попробуйте еще раз.")
 
@@ -1261,17 +1055,9 @@ def get_user_router() -> Router:
         await callback.answer()
         await state.update_data(customer_email=None)
 
-        data = await state.get_data()
-        await callback.message.edit_text(
-            CHOOSE_PAYMENT_METHOD_MESSAGE,
-            reply_markup=keyboards.create_payment_method_keyboard(
-                payment_methods=PAYMENT_METHODS,
-                action=data.get('action'),
-                key_id=data.get('key_id')
-            )
-        )
-        await state.set_state(PaymentProcess.waiting_for_payment_method)
-        logger.info(f"User {callback.from_user.id}: State set to waiting_for_payment_method")
+        # Показываем опции оплаты с учетом балансов и цены
+        await show_payment_options(callback.message, state)
+        logger.info(f"User {callback.from_user.id}: State set to waiting_for_payment_method via show_payment_options")
 
     async def show_payment_options(message: types.Message, state: FSMContext):
         data = await state.get_data()
@@ -1282,7 +1068,7 @@ def get_user_router() -> Router:
             await message.edit_text("❌ Ошибка: Тариф не найден.")
             await state.clear()
             return
-
+        
         price = Decimal(str(plan['price']))
         final_price = price
         discount_applied = False
@@ -1304,12 +1090,23 @@ def get_user_router() -> Router:
 
         await state.update_data(final_price=float(final_price))
 
+        # Получаем основной баланс для показа кнопки оплаты с баланса
+        try:
+            main_balance = get_balance(message.chat.id)
+        except Exception:
+            main_balance = 0.0
+
+        show_balance_btn = main_balance >= float(final_price)
+
         await message.edit_text(
             message_text,
             reply_markup=keyboards.create_payment_method_keyboard(
                 payment_methods=PAYMENT_METHODS,
                 action=data.get('action'),
-                key_id=data.get('key_id')
+                key_id=data.get('key_id'),
+                show_balance=show_balance_btn,
+                main_balance=main_balance,
+                price=float(final_price)
             )
         )
         await state.set_state(PaymentProcess.waiting_for_payment_method)
@@ -1322,7 +1119,6 @@ def get_user_router() -> Router:
             reply_markup=keyboards.create_skip_email_keyboard()
         )
         await state.set_state(PaymentProcess.waiting_for_email)
-
 
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_yookassa")
     async def create_yookassa_payment_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -1447,80 +1243,6 @@ def get_user_router() -> Router:
             return
 
         base_price = Decimal(str(plan['price']))
-        price_rub = base_price
-
-        if user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
-            discount_percentage_str = get_setting("referral_discount") or "0"
-            discount_percentage = Decimal(discount_percentage_str)
-            if discount_percentage > 0:
-                discount_amount = (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
-                price_rub = base_price - discount_amount
-        months = plan['months']
-        
-        try:
-            exchange_rate = await get_usdt_rub_rate()
-
-            if not exchange_rate:
-                logger.warning("Failed to get live exchange rate. Falling back to the rate from settings.")
-                if not exchange_rate:
-                    await callback.message.edit_text("❌ Не удалось получить курс валют. Попробуйте позже.")
-                    await state.clear()
-                    return
-
-            margin = Decimal("1.03")
-            price_usdt = (price_rub / exchange_rate * margin).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            
-            logger.info(f"Creating Crypto Pay invoice for user {user_id}. Plan price: {price_rub} RUB. Converted to: {price_usdt} USDT.")
-
-            crypto = CryptoPay(cryptobot_token)
-            
-            payload_data = f"{user_id}:{months}:{float(price_rub)}:{action}:{key_id}:{host_name}:{plan_id}:{customer_email}:CryptoBot"
-
-            invoice = await crypto.create_invoice(
-                currency_type="fiat",
-                fiat="RUB",
-                amount=float(price_rub),
-                description=f"Подписка на {months} мес.",
-                payload=payload_data,
-                expires_in=3600
-            )
-            
-            if not invoice or not invoice.pay_url:
-                raise Exception("Failed to create invoice or pay_url is missing.")
-
-            await callback.message.edit_text(
-                "Нажмите на кнопку ниже для оплаты:",
-                reply_markup=keyboards.create_payment_keyboard(invoice.pay_url)
-            )
-            await state.clear()
-
-        except Exception as e:
-            logger.error(f"Failed to create Crypto Pay invoice for user {user_id}: {e}", exc_info=True)
-            await callback.message.edit_text(f"❌ Не удалось создать счет для оплаты криптовалютой.\n\n<pre>Ошибка: {e}</pre>")
-            await state.clear()
-        
-    @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_heleket")
-    async def create_heleket_invoice_handler(callback: types.CallbackQuery, state: FSMContext):
-        await callback.answer("Создаю счет Heleket...")
-        
-        data = await state.get_data()
-        plan = get_plan_by_id(data.get('plan_id'))
-        user_data = get_user(callback.from_user.id)
-        
-        if not plan:
-            await callback.message.edit_text("❌ Произошла ошибка при выборе тарифа.")
-            await state.clear()
-            return
-
-        plan_id = data.get('plan_id')
-        plan = get_plan_by_id(plan_id)
-
-        if not plan:
-            await callback.message.answer("Произошла ошибка при выборе тарифа.")
-            await state.clear()
-            return
-
-        base_price = Decimal(str(plan['price']))
         price_rub_decimal = base_price
 
         if user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
@@ -1620,229 +1342,82 @@ def get_user_router() -> Router:
             await callback.message.answer("❌ Не удалось создать ссылку для TON Connect. Попробуйте позже.")
             await state.clear()
 
-        @user_router.message(F.text)
-        @registration_required
-        async def unknown_message_handler(message: types.Message):
-            if message.text.startswith('/'):
-                await message.answer("Такой команды не существует. Попробуйте /start.")
-            else:
-                await message.answer("Я не понимаю эту команду. Пожалуйста, используйте кнопки меню.")
-    return user_router
+    @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_balance")
+    async def pay_with_main_balance_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+        await callback.answer()
+        data = await state.get_data()
+        user_id = callback.from_user.id
+        plan = get_plan_by_id(data.get('plan_id'))
+        if not plan:
+            await callback.message.edit_text("❌ Ошибка: Тариф не найден.")
+            await state.clear()
+            return
+        months = int(plan['months'])
+        price = float(data.get('final_price', plan['price']))
 
-_user_connectors: Dict[int, TonConnect] = {}
-_listener_tasks: Dict[int, asyncio.Task] = {}
-
-async def _get_ton_connect_instance(user_id: int) -> TonConnect:
-    if user_id not in _user_connectors:
-        manifest_url = 'https://raw.githubusercontent.com/ton-blockchain/ton-connect/main/requests-responses.json'
-        _user_connectors[user_id] = TonConnect(manifest_url=manifest_url)
-    return _user_connectors[user_id]
-
-async def _listener_task(connector: TonConnect, user_id: int, transaction_payload: dict):
-    try:
-        wallet_connected = False
-        for _ in range(120):
-            if connector.connected:
-                wallet_connected = True
-                break
-            await asyncio.sleep(1)
-
-        if not wallet_connected:
-            logger.warning(f"TON Connect: Timeout waiting for wallet connection from user {user_id}.")
+        # Пытаемся списать средства с основного баланса
+        if not deduct_from_balance(user_id, price):
+            await callback.answer("Недостаточно средств на основном балансе.", show_alert=True)
             return
 
-        logger.info(f"TON Connect: Wallet connected for user {user_id}. Address: {connector.account.address}")
-        
-        logger.info(f"TON Connect: Sending transaction request to user {user_id} with payload: {transaction_payload}")
-        await connector.send_transaction(transaction_payload)
-        
-        logger.info(f"TON Connect: Transaction request sent successfully for user {user_id}.")
+        metadata = {
+            "user_id": user_id,
+            "months": months,
+            "price": price,
+            "action": data.get('action'),
+            "key_id": data.get('key_id'),
+            "host_name": data.get('host_name'),
+            "plan_id": data.get('plan_id'),
+            "customer_email": data.get('customer_email'),
+            "payment_method": "Balance",
+            "chat_id": callback.message.chat.id,
+            "message_id": callback.message.message_id
+        }
 
-    except UserRejectsError:
-        logger.warning(f"TON Connect: User {user_id} rejected the transaction.")
-    except Exception as e:
-        logger.error(f"TON Connect: An error occurred in the listener task for user {user_id}: {e}", exc_info=True)
-    finally:
-        if user_id in _user_connectors:
-            del _user_connectors[user_id]
-        if user_id in _listener_tasks:
-            del _listener_tasks[user_id]
+        await state.clear()
+        await process_successful_payment(bot, metadata)
 
-async def _start_ton_connect_process(user_id: int, transaction_payload: dict) -> str:
-    if user_id in _listener_tasks and not _listener_tasks[user_id].done():
-        _listener_tasks[user_id].cancel()
-
-    connector = await _get_ton_connect_instance(user_id)
     
-    task = asyncio.create_task(
-        _listener_task(connector, user_id, transaction_payload)
-    )
-    _listener_tasks[user_id] = task
 
-    wallets = connector.get_wallets()
-    return await connector.connect(wallets[0])
-
-async def process_successful_onboarding(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer("✅ Спасибо! Доступ предоставлен.")
-    set_terms_agreed(callback.from_user.id)
-    await state.clear()
-    await callback.message.delete()
-    await callback.message.answer("Приятного использования!", reply_markup=keyboards.main_reply_keyboard)
-    await show_main_menu(callback.message)
-
-async def is_url_reachable(url: str) -> bool:
-    pattern = re.compile(
-        r'^(https?://)'
-        r'(([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})'
-        r'(/.*)?$'
-    )
-    if not re.match(pattern, url):
-        return False
-
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-            async with session.head(url, allow_redirects=True) as response:
-                return response.status < 400
-    except Exception as e:
-        logger.warning(f"URL validation failed for {url}. Error: {e}")
-        return False
+    return user_router
 
 async def notify_admin_of_purchase(bot: Bot, metadata: dict):
-    if not ADMIN_ID:
-        logger.warning("Admin notification skipped: ADMIN_ID is not set.")
-        return
-
     try:
+        admin_id_raw = get_setting("admin_telegram_id")
+        if not admin_id_raw:
+            return
+        admin_id = int(admin_id_raw)
         user_id = metadata.get('user_id')
-        months = metadata.get('months')
-        price = float(metadata.get('price'))
         host_name = metadata.get('host_name')
+        months = metadata.get('months')
+        price = metadata.get('price')
+        action = metadata.get('action')
+        payment_method = metadata.get('payment_method') or 'Unknown'
+        # Локализация методов оплаты для уведомления админу
+        payment_method_map = {
+            'Balance': 'Баланс',
+            'Card': 'Карта',
+            'Crypto': 'Крипто',
+            'USDT': 'USDT',
+            'TON': 'TON',
+        }
+        payment_method_display = payment_method_map.get(payment_method, payment_method)
         plan_id = metadata.get('plan_id')
-        payment_method = metadata.get('payment_method', 'Unknown')
-        
-        user_info = get_user(user_id)
-        plan_info = get_plan_by_id(plan_id)
+        plan = get_plan_by_id(plan_id)
+        plan_name = plan.get('plan_name', 'Unknown') if plan else 'Unknown'
 
-        username = user_info.get('username', 'N/A') if user_info else 'N/A'
-        plan_name = plan_info.get('plan_name', f'{months} мес.') if plan_info else f'{months} мес.'
-
-        message_text = (
-            "🎉 **Новая покупка!** 🎉\n\n"
-            f"👤 **Пользователь:** @{username} (ID: `{user_id}`)\n"
-            f"🌍 **Сервер:** {host_name}\n"
-            f"📄 **Тариф:** {plan_name}\n"
-            f"💰 **Сумма:** {price:.2f} RUB\n"
-            f"💳 **Способ оплаты:** {payment_method}"
+        text = (
+            "📥 Новая оплата\n"
+            f"👤 Пользователь: {user_id}\n"
+            f"🗺️ Хост: {host_name}\n"
+            f"📦 Тариф: {plan_name} ({months} мес.)\n"
+            f"💳 Метод: {payment_method_display}\n"
+            f"💰 Сумма: {float(price):.2f} RUB\n"
+            f"⚙️ Действие: {'Новый ключ' if action == 'new' else 'Продление'}"
         )
-
-        await bot.send_message(
-            chat_id=ADMIN_ID,
-            text=message_text,
-            parse_mode='Markdown'
-        )
-        logger.info(f"Admin notification sent for a new purchase by user {user_id}.")
-
+        await bot.send_message(admin_id, text)
     except Exception as e:
-        logger.error(f"Failed to send admin notification for purchase: {e}", exc_info=True)
-
-async def _create_heleket_payment_request(user_id: int, price: float, months: int, host_name: str, state_data: dict) -> str | None:
-    merchant_id = get_setting("heleket_merchant_id")
-    api_key = get_setting("heleket_api_key")
-    bot_username = get_setting("telegram_bot_username")
-    domain = get_setting("domain")
-
-    if not all([merchant_id, api_key, bot_username, domain]):
-        logger.error("Heleket Error: Not all required settings are configured.")
-        return None
-
-    redirect_url = f"https://t.me/{bot_username}"
-    order_id = str(uuid.uuid4())
-    
-    metadata = {
-        "user_id": user_id, "months": months, "price": float(price),
-        "action": state_data.get('action'), "key_id": state_data.get('key_id'),
-        "host_name": host_name, "plan_id": state_data.get('plan_id'),
-        "customer_email": state_data.get('customer_email'), "payment_method": "Heleket"
-    }
-
-    payload = {
-        "amount": f"{price:.2f}",
-        "currency": "RUB",
-        "order_id": order_id,
-        "description": json.dumps(metadata),
-        "url_return": redirect_url,
-        "url_success": redirect_url,
-        "url_callback": f"https://{domain}/heleket-webhook",
-        "lifetime": 1800,
-        "is_payment_multiple": False
-    }
-    
-    headers = {
-        "merchant": merchant_id,
-        "sign": _generate_heleket_signature(json.dumps(payload), api_key),
-        "Content-Type": "application/json",
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            url = "https://api.heleket.com/v1/payment"
-            async with session.post(url, json=payload, headers=headers) as response:
-                result = await response.json()
-                if response.status == 200 and result.get("result", {}).get("url"):
-                    return result["result"]["url"]
-                else:
-                    logger.error(f"Heleket API Error: Status {response.status}, Result: {result}")
-                    return None
-    except Exception as e:
-        logger.error(f"Heleket request failed: {e}", exc_info=True)
-        return None
-
-def _generate_heleket_signature(data, api_key: str) -> str:
-    if isinstance(data, dict):
-        data_str = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
-    else:
-        data_str = str(data)
-    base64_encoded = base64.b64encode(data_str.encode()).decode()
-    raw_string = f"{base64_encoded}{api_key}"
-    return hashlib.md5(raw_string.encode()).hexdigest()
-
-async def get_usdt_rub_rate() -> Decimal | None:
-    url = "https://api.binance.com/api/v3/ticker/price"
-    params = {"symbol": "USDTRUB"}
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params) as response:
-                response.raise_for_status()
-                data = await response.json()
-                price_str = data.get('price')
-                if price_str:
-                    logger.info(f"Got USDT RUB: {price_str}")
-                    return Decimal(price_str)
-                logger.error("Can't find 'price' in Binance response.")
-                return None
-    except Exception as e:
-        logger.error(f"Error getting USDT RUB Binance rate: {e}", exc_info=True)
-        return None
-    
-async def get_ton_usdt_rate() -> Decimal | None:
-    url = "https://api.binance.com/api/v3/ticker/price"
-    params = {"symbol": "TONUSDT"}
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params) as response:
-                response.raise_for_status()
-                data = await response.json()
-                price_str = data.get('price')
-                if price_str:
-                    logger.info(f"Got TON USDT: {price_str}")
-                    return Decimal(price_str)
-                logger.error("Can't find 'price' in Binance response.")
-                return None
-    except Exception as e:
-        logger.error(f"Error getting TON USDT Binance rate: {e}", exc_info=True)
-        return None
+        logger.warning(f"notify_admin_of_purchase failed: {e}")
 
 async def process_successful_payment(bot: Bot, metadata: dict):
     try:
@@ -1876,8 +1451,24 @@ async def process_successful_payment(bot: Bot, metadata: dict):
     try:
         email = ""
         if action == "new":
-            key_number = get_next_key_number(user_id)
-            email = f"user{user_id}-key{key_number}@{host_name.replace(' ', '').lower()}.bot"
+            # Сформируем email в формате {username}@bot.local с авто-суффиксом при коллизиях
+            user_data = get_user(user_id) or {}
+            raw_username = (user_data.get('username') or f'user{user_id}').lower()
+            username_slug = re.sub(r"[^a-z0-9._-]", "_", raw_username).strip("_")[:16] or f"user{user_id}"
+            base_local = f"{username_slug}"
+            candidate_local = base_local
+            attempt = 1
+            while True:
+                candidate_email = f"{candidate_local}@bot.local"
+                if not get_key_by_email(candidate_email):
+                    break
+                attempt += 1
+                candidate_local = f"{base_local}-{attempt}"
+                if attempt > 100:
+                    candidate_local = f"{base_local}-{int(datetime.now().timestamp())}"
+                    candidate_email = f"{candidate_local}@bot.local"
+                    break
+            email = candidate_email
         elif action == "extend":
             key_data = get_key_by_id(key_id)
             if not key_data or key_data['user_id'] != user_id:
@@ -1906,21 +1497,28 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         user_data = get_user(user_id)
         referrer_id = user_data.get('referred_by')
 
+        # Начисляем реферальное вознаграждение (оплата с реферального баланса больше не используется)
         if referrer_id:
             percentage = Decimal(get_setting("referral_percentage") or "0")
-            
             reward = (Decimal(str(price)) * percentage / 100).quantize(Decimal("0.01"))
-            
             if float(reward) > 0:
-                add_to_referral_balance(referrer_id, float(reward))
-                
+                # теперь начисляем в основной баланс
+                try:
+                    ok = add_to_balance(referrer_id, float(reward))
+                except Exception:
+                    ok = False
+                # увеличиваем суммарный заработок по рефералке
+                try:
+                    add_to_referral_balance_all(referrer_id, float(reward))
+                except Exception as e:
+                    logger.warning(f"Failed to increment referral_balance_all for {referrer_id}: {e}")
                 try:
                     referrer_username = user_data.get('username', 'пользователь')
-                    await bot.send_message(
-                        referrer_id,
-                        f"🎉 Ваш реферал @{referrer_username} совершил покупку на сумму {price:.2f} RUB!\n"
-                        f"💰 На ваш баланс начислено вознаграждение: {reward:.2f} RUB."
-                    )
+                    if ok:
+                        await bot.send_message(
+                            referrer_id,
+                            f"🎉 Ваш реферал @{referrer_username} совершил оплату на {price:.2f} RUB.\n"
+                            f"💰 Вам начислено {float(reward):.2f} RUB на баланс администратором.")
                 except Exception as e:
                     logger.warning(f"Could not send referral reward notification to {referrer_id}: {e}")
 
@@ -1976,8 +1574,17 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             reply_markup=keyboards.create_key_info_keyboard(key_id)
         )
 
-        await notify_admin_of_purchase(bot, metadata)
+        try:
+            await notify_admin_of_purchase(bot, metadata)
+        except Exception as e:
+            logger.warning(f"Failed to notify admin of purchase: {e}")
         
     except Exception as e:
         logger.error(f"Error processing payment for user {user_id} on host {host_name}: {e}", exc_info=True)
-        await processing_message.edit_text("❌ Ошибка при выдаче ключа.")
+        try:
+            await processing_message.edit_text("❌ Ошибка при выдаче ключа.")
+        except Exception:
+            try:
+                await bot.send_message(chat_id=user_id, text="❌ Ошибка при выдаче ключа.")
+            except Exception:
+                pass

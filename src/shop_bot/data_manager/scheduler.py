@@ -156,8 +156,12 @@ async def sync_keys_with_panels():
                         await xui_api.delete_client_on_host(host_name, key_email)
                     except Exception as e:
                         logger.error(f"Scheduler: Failed to delete client '{key_email}' from panel: {e}")
-                    database.delete_key_by_email(key_email)
-                    total_affected_records += 1
+                    deleted = database.delete_key_by_email(key_email)
+                    if deleted:
+                        total_affected_records += 1
+                        logger.info(f"Scheduler: Deleted key '{key_email}' from local DB after panel cleanup.")
+                    else:
+                        logger.warning(f"Scheduler: Tried to delete key '{key_email}' from local DB, but no records were affected.")
                     continue
 
                 server_client = clients_on_server.pop(key_email, None)

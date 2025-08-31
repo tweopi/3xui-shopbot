@@ -3,6 +3,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 import json
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ def initialize_db():
                     agreed_to_terms BOOLEAN DEFAULT 0,
                     registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     is_banned BOOLEAN DEFAULT 0,
+                    balance REAL DEFAULT 0,
                     referred_by INTEGER,
                     referral_balance REAL DEFAULT 0,
                     referral_balance_all REAL DEFAULT 0
@@ -127,6 +129,7 @@ def initialize_db():
                 "referral_discount": "5",
                 "minimum_withdrawal": "100",
                 "admin_telegram_id": None,
+                "admin_telegram_ids": None,
                 "yookassa_shop_id": None,
                 "yookassa_secret_key": None,
                 "sbp_enabled": "false",
@@ -168,6 +171,12 @@ def run_migration():
         else:
             logging.info(" -> The column 'referred_by' already exists.")
             
+        if 'balance' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN balance REAL DEFAULT 0")
+            logging.info(" -> The column 'balance' is successfully added.")
+        else:
+            logging.info(" -> The column 'balance' already exists.")
+        
         if 'referral_balance' not in columns:
             cursor.execute("ALTER TABLE users ADD COLUMN referral_balance REAL DEFAULT 0")
             logging.info(" -> The column 'referral_balance' is successfully added.")
@@ -393,6 +402,79 @@ def get_all_hosts() -> list[dict]:
         logging.error(f"Error getting list of all hosts: {e}")
         return []
 
+def get_admin_stats() -> dict:
+    """Return aggregated statistics for the admin dashboard.
+    Includes:
+    - total_users: count of users
+    - total_keys: count of all keys
+    - active_keys: keys with expiry_date in the future
+    - total_income: sum of amount_rub for successful transactions
+    """
+    stats = {
+        "total_users": 0,
+        "total_keys": 0,
+        "active_keys": 0,
+        "total_income": 0.0,
+        # today's metrics
+        "today_new_users": 0,
+        "today_income": 0.0,
+        "today_issued_keys": 0,
+    }
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            # users
+            cursor.execute("SELECT COUNT(*) FROM users")
+            row = cursor.fetchone()
+            stats["total_users"] = (row[0] or 0) if row else 0
+
+            # total keys
+            cursor.execute("SELECT COUNT(*) FROM vpn_keys")
+            row = cursor.fetchone()
+            stats["total_keys"] = (row[0] or 0) if row else 0
+
+            # active keys
+            cursor.execute("SELECT COUNT(*) FROM vpn_keys WHERE expiry_date > CURRENT_TIMESTAMP")
+            row = cursor.fetchone()
+            stats["active_keys"] = (row[0] or 0) if row else 0
+
+            # income: consider common success markers (total)
+            cursor.execute(
+                "SELECT COALESCE(SUM(amount_rub), 0) FROM transactions WHERE status IN ('paid','success','succeeded')"
+            )
+            row = cursor.fetchone()
+            stats["total_income"] = float(row[0] or 0.0) if row else 0.0
+
+            # today's metrics
+            # new users today
+            cursor.execute(
+                "SELECT COUNT(*) FROM users WHERE date(registration_date) = date('now')"
+            )
+            row = cursor.fetchone()
+            stats["today_new_users"] = (row[0] or 0) if row else 0
+
+            # today's income
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(amount_rub), 0)
+                FROM transactions
+                WHERE status IN ('paid','success','succeeded')
+                  AND date(created_date) = date('now')
+                """
+            )
+            row = cursor.fetchone()
+            stats["today_income"] = float(row[0] or 0.0) if row else 0.0
+
+            # today's issued keys
+            cursor.execute(
+                "SELECT COUNT(*) FROM vpn_keys WHERE date(created_date) = date('now')"
+            )
+            row = cursor.fetchone()
+            stats["today_issued_keys"] = (row[0] or 0) if row else 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get admin stats: {e}")
+    return stats
+
 def get_all_keys() -> list[dict]:
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -404,6 +486,76 @@ def get_all_keys() -> list[dict]:
         logging.error(f"Failed to get all keys: {e}")
         return []
 
+def get_keys_for_user(user_id: int) -> list[dict]:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM vpn_keys WHERE user_id = ? ORDER BY created_date DESC", (user_id,))
+            return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get keys for user {user_id}: {e}")
+        return []
+
+def get_key_by_id(key_id: int) -> dict | None:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM vpn_keys WHERE key_id = ?", (key_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get key by id {key_id}: {e}")
+        return None
+
+def update_key_email(key_id: int, new_email: str) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE vpn_keys SET key_email = ? WHERE key_id = ?", (new_email, key_id))
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.IntegrityError as e:
+        logging.error(f"Email uniqueness violation for key {key_id}: {e}")
+        return False
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update key email for {key_id}: {e}")
+        return False
+
+def update_key_host(key_id: int, new_host_name: str) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE vpn_keys SET host_name = ? WHERE key_id = ?", (normalize_host_name(new_host_name), key_id))
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update key host for {key_id}: {e}")
+        return False
+
+def create_gift_key(user_id: int, host_name: str, key_email: str, months: int, xui_client_uuid: str | None = None) -> int | None:
+    """Создать подарочный ключ: задаёт expiry_date = now + months, host_name нормализуется.
+    Возвращает key_id или None при ошибке."""
+    try:
+        host_name = normalize_host_name(host_name)
+        from datetime import timedelta
+        expiry = datetime.now() + timedelta(days=30 * int(months or 1))
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO vpn_keys (user_id, host_name, xui_client_uuid, key_email, expiry_date) VALUES (?, ?, ?, ?, ?)",
+                (user_id, host_name, xui_client_uuid or f"GIFT-{user_id}-{int(datetime.now().timestamp())}", key_email, expiry.isoformat())
+            )
+            conn.commit()
+            return cursor.lastrowid
+    except sqlite3.IntegrityError as e:
+        logging.error(f"Failed to create gift key for user {user_id}: duplicate email {key_email}: {e}")
+        return None
+    except sqlite3.Error as e:
+        logging.error(f"Failed to create gift key for user {user_id}: {e}")
+        return None
+
 def get_setting(key: str) -> str | None:
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -414,6 +566,75 @@ def get_setting(key: str) -> str | None:
     except sqlite3.Error as e:
         logging.error(f"Failed to get setting '{key}': {e}")
         return None
+
+def get_admin_ids() -> set[int]:
+    """Возвращает множество ID администраторов из настроек.
+    Поддерживает оба варианта: одиночный 'admin_telegram_id' и список 'admin_telegram_ids'
+    через запятую/пробелы или JSON-массив.
+    """
+    ids: set[int] = set()
+    try:
+        single = get_setting("admin_telegram_id")
+        if single:
+            try:
+                ids.add(int(single))
+            except Exception:
+                pass
+        multi_raw = get_setting("admin_telegram_ids")
+        if multi_raw:
+            s = (multi_raw or "").strip()
+            # Попробуем как JSON-массив
+            try:
+                arr = json.loads(s)
+                if isinstance(arr, list):
+                    for v in arr:
+                        try:
+                            ids.add(int(v))
+                        except Exception:
+                            pass
+                    return ids
+            except Exception:
+                pass
+            # Иначе как строка с разделителями (запятая/пробел)
+            parts = [p for p in re.split(r"[\s,]+", s) if p]
+            for p in parts:
+                try:
+                    ids.add(int(p))
+                except Exception:
+                    pass
+    except Exception as e:
+        logging.warning(f"get_admin_ids failed: {e}")
+    return ids
+
+def is_admin(user_id: int) -> bool:
+    """Проверка прав администратора по списку ID из настроек."""
+    try:
+        return int(user_id) in get_admin_ids()
+    except Exception:
+        return False
+        
+def get_referrals_for_user(user_id: int) -> list[dict]:
+    """Возвращает список пользователей, которых пригласил данный user_id.
+    Поля: telegram_id, username, registration_date, total_spent.
+    """
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT telegram_id, username, registration_date, total_spent
+                FROM users
+                WHERE referred_by = ?
+                ORDER BY registration_date DESC
+                """,
+                (user_id,)
+            )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get referrals for user {user_id}: {e}")
+        return []
         
 def get_all_settings() -> dict:
     settings = {}
@@ -549,6 +770,29 @@ def set_referral_balance_all(user_id: int, value: float):
     except sqlite3.Error as e:
         logging.error(f"Failed to set total referral balance for user {user_id}: {e}")
 
+def add_to_referral_balance_all(user_id: int, amount: float):
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET referral_balance_all = referral_balance_all + ? WHERE telegram_id = ?",
+                (amount, user_id)
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        logging.error(f"Failed to add to total referral balance for user {user_id}: {e}")
+
+def get_referral_balance_all(user_id: int) -> float:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT referral_balance_all FROM users WHERE telegram_id = ?", (user_id,))
+            row = cursor.fetchone()
+            return row[0] if row else 0.0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get total referral balance for user {user_id}: {e}")
+        return 0.0
+
 def get_referral_balance(user_id: int) -> float:
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -559,6 +803,81 @@ def get_referral_balance(user_id: int) -> float:
     except sqlite3.Error as e:
         logging.error(f"Failed to get referral balance for user {user_id}: {e}")
         return 0.0
+
+def get_balance(user_id: int) -> float:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT balance FROM users WHERE telegram_id = ?", (user_id,))
+            result = cursor.fetchone()
+            return result[0] if result else 0.0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get balance for user {user_id}: {e}")
+        return 0.0
+
+def set_balance(user_id: int, value: float) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET balance = ? WHERE telegram_id = ?", (value, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to set balance for user {user_id}: {e}")
+        return False
+
+def add_to_balance(user_id: int, amount: float) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ?", (amount, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to add to balance for user {user_id}: {e}")
+        return False
+
+def deduct_from_balance(user_id: int, amount: float) -> bool:
+    """Атомарное списание с основного баланса при достаточности средств."""
+    if amount <= 0:
+        return True
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute("SELECT balance FROM users WHERE telegram_id = ?", (user_id,))
+            row = cursor.fetchone()
+            current = row[0] if row else 0.0
+            if current < amount:
+                conn.rollback()
+                return False
+            cursor.execute("UPDATE users SET balance = balance - ? WHERE telegram_id = ?", (amount, user_id))
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to deduct from balance for user {user_id}: {e}")
+        return False
+
+def deduct_from_referral_balance(user_id: int, amount: float) -> bool:
+    """Атомарное списание с реферального баланса при достаточности средств."""
+    if amount <= 0:
+        return True
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute("SELECT referral_balance FROM users WHERE telegram_id = ?", (user_id,))
+            row = cursor.fetchone()
+            current = row[0] if row else 0.0
+            if current < amount:
+                conn.rollback()
+                return False
+            cursor.execute("UPDATE users SET referral_balance = referral_balance - ? WHERE telegram_id = ?", (amount, user_id))
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to deduct from referral balance for user {user_id}: {e}")
+        return False
 
 def get_referral_count(user_id: int) -> int:
     try:
@@ -747,14 +1066,18 @@ def add_new_key(user_id: int, host_name: str, xui_client_uuid: str, key_email: s
         logging.error(f"Failed to add new key for user {user_id}: {e}")
         return None
 
-def delete_key_by_email(email: str):
+def delete_key_by_email(email: str) -> bool:
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM vpn_keys WHERE key_email = ?", (email,))
+            affected = cursor.rowcount
             conn.commit()
+            logger.debug(f"delete_key_by_email('{email}') affected={affected}")
+            return affected > 0
     except sqlite3.Error as e:
         logging.error(f"Failed to delete key '{email}': {e}")
+        return False
 
 def get_user_keys(user_id: int):
     try:
@@ -909,10 +1232,10 @@ def get_recent_transactions(limit: int = 15) -> list[dict]:
                 LIMIT ?;
             """
             cursor.execute(query, (limit,))
-            transactions = [dict(row) for row in cursor.fetchall()]
     except sqlite3.Error as e:
         logging.error(f"Failed to get recent transactions: {e}")
     return transactions
+
 
 def get_all_users() -> list[dict]:
     try:

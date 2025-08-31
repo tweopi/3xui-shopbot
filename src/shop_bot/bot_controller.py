@@ -2,12 +2,13 @@ import asyncio
 import logging
 
 from yookassa import Configuration
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode 
 
 from shop_bot.data_manager import database
 from shop_bot.bot.handlers import get_user_router
+from shop_bot.bot.admin_handlers import get_admin_router
 from shop_bot.bot.middlewares import BanMiddleware
 from shop_bot.bot import handlers
 
@@ -70,8 +71,15 @@ class BotController:
             self._dp.update.middleware(BanMiddleware())
             
             user_router = get_user_router()
+            admin_router = get_admin_router()
+
+            if not isinstance(user_router, Router):
+                raise TypeError(f"get_user_router() must return Router instance, got: {type(user_router)}")
+            if not isinstance(admin_router, Router):
+                raise TypeError(f"get_admin_router() must return Router instance, got: {type(admin_router)}")
             
             self._dp.include_router(user_router)
+            self._dp.include_router(admin_router)
             
             try:
                 asyncio.run_coroutine_threadsafe(self._bot.delete_webhook(drop_pending_updates=True), self._loop)

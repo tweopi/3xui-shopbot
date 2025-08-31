@@ -6,6 +6,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from shop_bot.data_manager import database
+from shop_bot.data_manager.database import get_admin_ids
 from shop_bot.support_bot.handlers import get_support_router
 
 logger = logging.getLogger(__name__)
@@ -52,12 +53,14 @@ class SupportBotController:
 
         token = database.get_setting("support_bot_token")
         bot_username = database.get_setting("support_bot_username")
+        # допускаем отсутствие одиночного admin_telegram_id, если настроены admin_telegram_ids
         admin_id = database.get_setting("admin_telegram_id")
+        admin_ids = get_admin_ids()
 
-        if not all([token, bot_username, admin_id]):
+        if not all([token, bot_username]) or (not admin_id and not admin_ids):
             return {
                 "status": "error",
-                "message": "Невозможно запустить support-бот: заполните support_bot_token, support_bot_username и admin_telegram_id."
+                "message": "Невозможно запустить support-бот: заполните support_bot_token, support_bot_username и хотя бы одного администратора (admin_telegram_id или admin_telegram_ids)."
             }
 
         try:

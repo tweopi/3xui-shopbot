@@ -27,12 +27,103 @@ def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: 
     builder.button(text="ℹ️ О проекте", callback_data="show_about")
     builder.button(text="❓ Как использовать", callback_data="howto_vless")
     if is_admin:
-        builder.button(text="📢 Рассылка", callback_data="start_broadcast")
+        builder.button(text="⚙️ Админка", callback_data="admin_menu")
 
     layout = [1 if trial_available and get_setting("trial_enabled") == "true" else 0, 2, 1, 2, 1, 1 if is_admin else 0]
     actual_layout = [size for size in layout if size > 0]
     builder.adjust(*actual_layout)
     
+    return builder.as_markup()
+
+def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👥 Пользователи", callback_data="admin_users")
+    builder.button(text="🌍 Ключи на хосте", callback_data="admin_host_keys")
+    builder.button(text="🎁 Выдать ключ", callback_data="admin_gift_key")
+    builder.button(text="➕ Добавить админа", callback_data="admin_add_admin")
+    builder.button(text="📢 Рассылка", callback_data="start_broadcast")
+    builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
+    builder.adjust(2, 2, 1, 1)
+    return builder.as_markup()
+
+def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int = 10) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    start = page * page_size
+    end = start + page_size
+    for u in users[start:end]:
+        user_id = u.get('telegram_id') or u.get('user_id') or u.get('id')
+        username = u.get('username') or '—'
+        title = f"{user_id} • @{username}" if username != '—' else f"{user_id}"
+        builder.button(text=title, callback_data=f"admin_view_user_{user_id}")
+    # pagination
+    total = len(users)
+    have_prev = page > 0
+    have_next = end < total
+    if have_prev:
+        builder.button(text="⬅️ Назад", callback_data=f"admin_users_page_{page-1}")
+    if have_next:
+        builder.button(text="Вперёд ➡️", callback_data=f"admin_users_page_{page+1}")
+    builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+    # layout: list (1 per row), then pagination/buttons (2), then back (1)
+    rows = [1] * len(users[start:end])
+    tail = []
+    if have_prev or have_next:
+        tail.append(2 if (have_prev and have_next) else 1)
+    tail.append(1)
+    builder.adjust(*(rows + tail if rows else ([2] if (have_prev or have_next) else []) + [1]))
+    return builder.as_markup()
+
+def create_admin_user_actions_keyboard(user_id: int, is_banned: bool | None = None) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Начислить баланс", callback_data=f"admin_add_balance_{user_id}")
+    builder.button(text="➖ Списать баланс", callback_data=f"admin_deduct_balance_{user_id}")
+    builder.button(text="🎁 Выдать ключ", callback_data=f"admin_gift_key_{user_id}")
+    builder.button(text="🤝 Рефералы пользователя", callback_data=f"admin_user_referrals_{user_id}")
+    if is_banned is True:
+        builder.button(text="✅ Разбанить", callback_data=f"admin_unban_user_{user_id}")
+    else:
+        builder.button(text="🚫 Забанить", callback_data=f"admin_ban_user_{user_id}")
+    builder.button(text="✏️ Ключи пользователя", callback_data=f"admin_user_keys_{user_id}")
+    builder.button(text="⬅️ К списку", callback_data="admin_users")
+    builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+    # Сделаем шире: 2 колонки, затем назад и в админ-меню
+    builder.adjust(2, 2, 2, 2, 1)
+    return builder.as_markup()
+
+def create_admin_user_keys_keyboard(user_id: int, keys: list[dict]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if keys:
+        for k in keys:
+            kid = k.get('key_id')
+            host = k.get('host_name') or '—'
+            email = k.get('key_email') or '—'
+            title = f"#{kid} • {host} • {email[:20]}"
+            builder.button(text=title, callback_data=f"admin_edit_key_{kid}")
+    else:
+        builder.button(text="Ключей нет", callback_data="noop")
+    builder.button(text="⬅️ Назад", callback_data=f"admin_view_user_{user_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_admin_key_actions_keyboard(key_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🌍 Изменить сервер", callback_data=f"admin_key_edit_host_{key_id}")
+    builder.button(text="➕ Добавить дни", callback_data=f"admin_key_extend_{key_id}")
+    builder.button(text="🗑 Удалить ключ", callback_data=f"admin_key_delete_{key_id}")
+    builder.button(text="⬅️ Назад к ключам", callback_data=f"admin_key_back_{key_id}")
+    builder.adjust(2, 2)
+    return builder.as_markup()
+
+def create_admin_delete_key_confirm_keyboard(key_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Подтвердить удаление", callback_data=f"admin_key_delete_confirm_{key_id}")
+    builder.button(text="❌ Отмена", callback_data=f"admin_key_delete_cancel_{key_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_admin_cancel_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
     return builder.as_markup()
 
 def create_broadcast_options_keyboard() -> InlineKeyboardMarkup:
@@ -67,18 +158,46 @@ def create_about_keyboard(channel_url: str | None, terms_url: str | None, privac
     builder.adjust(1)
     return builder.as_markup()
     
-def create_support_keyboard(support_user: str) -> InlineKeyboardMarkup:
+def create_support_keyboard(support_user: str | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🆘 Написать в поддержку", url=support_user)
-    builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
+    # Определяем username для поддержки
+    username = (support_user or "").strip()
+    if not username:
+        username = (get_setting("support_bot_username") or get_setting("support_user") or "").strip()
+    # Преобразуем в tg:// ссылку, если есть username/ссылка
+    url: str | None = None
+    if username:
+        if username.startswith("@"):  # @username
+            url = f"tg://resolve?domain={username[1:]}"
+        elif username.startswith("tg://"):  # уже tg-схема
+            url = username
+        elif username.startswith("http://") or username.startswith("https://"):
+            # http(s) ссылки на t.me/telegram.me -> в tg://
+            # Попробуем извлечь domain
+            try:
+                # простое извлечение последнего сегмента
+                part = username.split("/")[-1].split("?")[0]
+                if part:
+                    url = f"tg://resolve?domain={part}"
+            except Exception:
+                url = username
+        else:
+            # просто username без @
+            url = f"tg://resolve?domain={username}"
+
+    if url:
+        builder.button(text="🆘 Написать в поддержку", url=url)
+    else:
+        # Фолбэк: встроенное меню поддержки
+        builder.button(text="🆘 Поддержка", callback_data="show_help")
     builder.adjust(1)
     return builder.as_markup()
 
 def create_support_bot_link_keyboard(support_bot_username: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    deep_link = f"https://t.me/{support_bot_username}?start=new"
+    username = support_bot_username.lstrip("@")
+    deep_link = f"tg://resolve?domain={username}&start=new"
     builder.button(text="🆘 Открыть поддержку", url=deep_link)
-    builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -139,9 +258,27 @@ def create_skip_email_keyboard() -> InlineKeyboardMarkup:
     builder.adjust(1)
     return builder.as_markup()
 
-def create_payment_method_keyboard(payment_methods: dict, action: str, key_id: int) -> InlineKeyboardMarkup:
+def create_payment_method_keyboard(
+    payment_methods: dict,
+    action: str,
+    key_id: int,
+    show_balance: bool | None = None,
+    main_balance: float | None = None,
+    price: float | None = None,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    # Кнопки оплаты с балансов (если разрешено/достаточно средств)
+    if show_balance:
+        label = "💼 Оплатить с баланса"
+        if main_balance is not None:
+            try:
+                label += f" ({main_balance:.0f} RUB)"
+            except Exception:
+                pass
+        builder.button(text=label, callback_data="pay_balance")
+
+    # Внешние способы оплаты
     if payment_methods and payment_methods.get("yookassa"):
         if get_setting("sbp_enabled"):
             builder.button(text="🏦 СБП / Банковская карта", callback_data="pay_yookassa")
@@ -219,6 +356,13 @@ def create_back_to_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
     return builder.as_markup()
 
+def create_profile_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🤝 Реферальная программа", callback_data="show_referral_program")
+    builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def create_welcome_keyboard(channel_url: str | None, is_subscription_forced: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
@@ -240,3 +384,64 @@ def get_main_menu_button() -> InlineKeyboardButton:
 def get_buy_button() -> InlineKeyboardButton:
     return InlineKeyboardButton(text="💳 Купить подписку", callback_data="buy_vpn")
 
+
+def create_admin_users_pick_keyboard(users: list[dict], page: int = 0, page_size: int = 10, action: str = "gift") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    start = page * page_size
+    end = start + page_size
+    for u in users[start:end]:
+        user_id = u.get('telegram_id') or u.get('user_id') or u.get('id')
+        username = u.get('username') or '—'
+        title = f"{user_id} • @{username}" if username != '—' else f"{user_id}"
+        builder.button(text=title, callback_data=f"admin_{action}_pick_user_{user_id}")
+    total = len(users)
+    have_prev = page > 0
+    have_next = end < total
+    if have_prev:
+        builder.button(text="⬅️ Назад", callback_data=f"admin_{action}_pick_user_page_{page-1}")
+    if have_next:
+        builder.button(text="Вперёд ➡️", callback_data=f"admin_{action}_pick_user_page_{page+1}")
+    builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+    rows = [1] * len(users[start:end])
+    tail = []
+    if have_prev or have_next:
+        tail.append(2 if (have_prev and have_next) else 1)
+    tail.append(1)
+    builder.adjust(*(rows + tail if rows else ([2] if (have_prev or have_next) else []) + [1]))
+    return builder.as_markup()
+
+def create_admin_hosts_pick_keyboard(hosts: list[dict], action: str = "gift") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if hosts:
+        for h in hosts:
+            name = h.get('host_name')
+            builder.button(text=name, callback_data=f"admin_{action}_pick_host_{name}")
+    else:
+        builder.button(text="Хостов нет", callback_data="noop")
+    builder.button(text="⬅️ Назад", callback_data=f"admin_{action}_back_to_users")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_admin_keys_for_host_keyboard(host_name: str, keys: list[dict]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if keys:
+        for k in keys:
+            kid = k.get('key_id')
+            email = k.get('key_email') or '—'
+            expiry = k.get('expiry_date') or '—'
+            title = f"#{kid} • {email[:24]} • до {expiry}"
+            builder.button(text=title, callback_data=f"admin_edit_key_{kid}")
+    else:
+        builder.button(text="Ключей на хосте нет", callback_data="noop")
+    builder.button(text="⬅️ К выбору хоста", callback_data="admin_hostkeys_back_to_hosts")
+    builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_admin_months_pick_keyboard(action: str = "gift") -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for m in (1, 3, 6, 12):
+        builder.button(text=f"{m} мес.", callback_data=f"admin_{action}_pick_months_{m}")
+    builder.button(text="⬅️ Назад", callback_data=f"admin_{action}_back_to_hosts")
+    builder.adjust(2, 2, 1)
+    return builder.as_markup()
