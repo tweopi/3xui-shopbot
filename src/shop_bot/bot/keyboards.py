@@ -187,9 +187,11 @@ def create_support_keyboard(support_user: str | None = None) -> InlineKeyboardMa
 
     if url:
         builder.button(text="🆘 Написать в поддержку", url=url)
+        builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
     else:
         # Фолбэк: встроенное меню поддержки
         builder.button(text="🆘 Поддержка", callback_data="show_help")
+        builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -198,6 +200,7 @@ def create_support_bot_link_keyboard(support_bot_username: str) -> InlineKeyboar
     username = support_bot_username.lstrip("@")
     deep_link = f"tg://resolve?domain={username}&start=new"
     builder.button(text="🆘 Открыть поддержку", url=deep_link)
+    builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
