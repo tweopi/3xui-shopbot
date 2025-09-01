@@ -1258,7 +1258,10 @@ def get_user_router() -> Router:
         plan = get_plan_by_id(data.get('plan_id'))
         
         if not plan:
-            await message.edit_text("❌ Ошибка: Тариф не найден.")
+            try:
+                await message.edit_text("❌ Ошибка: Тариф не найден.")
+            except TelegramBadRequest:
+                await message.answer("❌ Ошибка: Тариф не найден.")
             await state.clear()
             return
         
@@ -1291,17 +1294,30 @@ def get_user_router() -> Router:
 
         show_balance_btn = main_balance >= float(final_price)
 
-        await message.edit_text(
-            message_text,
-            reply_markup=keyboards.create_payment_method_keyboard(
-                payment_methods=PAYMENT_METHODS,
-                action=data.get('action'),
-                key_id=data.get('key_id'),
-                show_balance=show_balance_btn,
-                main_balance=main_balance,
-                price=float(final_price)
+        try:
+            await message.edit_text(
+                message_text,
+                reply_markup=keyboards.create_payment_method_keyboard(
+                    payment_methods=PAYMENT_METHODS,
+                    action=data.get('action'),
+                    key_id=data.get('key_id'),
+                    show_balance=show_balance_btn,
+                    main_balance=main_balance,
+                    price=float(final_price)
+                )
             )
-        )
+        except TelegramBadRequest:
+            await message.answer(
+                message_text,
+                reply_markup=keyboards.create_payment_method_keyboard(
+                    payment_methods=PAYMENT_METHODS,
+                    action=data.get('action'),
+                    key_id=data.get('key_id'),
+                    show_balance=show_balance_btn,
+                    main_balance=main_balance,
+                    price=float(final_price)
+                )
+            )
         await state.set_state(PaymentProcess.waiting_for_payment_method)
         
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "back_to_email_prompt")

@@ -354,13 +354,13 @@ def get_admin_router() -> Router:
         try:
             await callback.message.edit_text(
                 text,
-                reply_markup=keyboards.create_admin_key_actions_keyboard(key_id)
+                reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
             )
         except Exception as e:
             logger.debug(f"edit_text failed in delete cancel for key #{key_id}: {e}")
             await callback.message.answer(
                 text,
-                reply_markup=keyboards.create_admin_key_actions_keyboard(key_id)
+                reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
             )
 
     # --- Удаление ключа: подтверждение (prompt) ---
@@ -470,7 +470,7 @@ def get_admin_router() -> Router:
             f"Истекает: {new_key.get('expiry_date') or '—'}\n"
         )
         await message.answer(f"✅ Ключ продлён на {days} дн.")
-        await message.answer(text, reply_markup=keyboards.create_admin_key_actions_keyboard(key_id))
+        await message.answer(text, reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(new_key.get('user_id')) if new_key and new_key.get('user_id') else None))
 
     # --- Управление администраторами: добавить админа ---
     class AdminAddAdmin(StatesGroup):
@@ -556,13 +556,13 @@ def get_admin_router() -> Router:
         try:
             await callback.message.edit_text(
                 text,
-                reply_markup=keyboards.create_admin_key_actions_keyboard(key_id)
+                reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
             )
         except Exception as e:
             logger.debug(f"edit_text failed in delete cancel for key #{key_id}: {e}")
             await callback.message.answer(
                 text,
-                reply_markup=keyboards.create_admin_key_actions_keyboard(key_id)
+                reply_markup=keyboards.create_admin_key_actions_keyboard(key_id, int(key.get('user_id')) if key and key.get('user_id') else None)
             )
 
     # --- Удаление ключа: подтверждение и выполнение ---
@@ -1012,7 +1012,7 @@ def get_admin_router() -> Router:
 
     # Back from key actions to keys list
     @admin_router.callback_query(F.data.startswith("admin_key_back_"))
-    async def admin_key_back(callback: types.CallbackQuery):
+    async def admin_key_back(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
             await callback.answer("У вас нет прав.", show_alert=True)
             return
@@ -1026,12 +1026,28 @@ def get_admin_router() -> Router:
         if not key:
             await callback.message.answer("❌ Ключ не найден")
             return
-        user_id = int(key.get('user_id'))
-        keys = get_keys_for_user(user_id)
-        await callback.message.edit_text(
-            f"🔑 Ключи пользователя {user_id}:",
-            reply_markup=keyboards.create_admin_user_keys_keyboard(user_id, keys)
-        )
+        # Если мы находимся в контексте просмотра ключей хоста — вернёмся к списку ключей этого хоста
+        host_from_state = None
+        try:
+            data = await state.get_data()
+            host_from_state = (data or {}).get('hostkeys_host')
+        except Exception:
+            host_from_state = None
+
+        if host_from_state:
+            host_name = host_from_state
+            keys = get_keys_for_host(host_name)
+            await callback.message.edit_text(
+                f"🔑 Ключи на хосте {host_name}:",
+                reply_markup=keyboards.create_admin_keys_for_host_keyboard(host_name, keys)
+            )
+        else:
+            user_id = int(key.get('user_id'))
+            keys = get_keys_for_user(user_id)
+            await callback.message.edit_text(
+                f"🔑 Ключи пользователя {user_id}:",
+                reply_markup=keyboards.create_admin_user_keys_keyboard(user_id, keys)
+            )
 
     # noop callback to safely ignore placeholder buttons
     @admin_router.callback_query(F.data == "noop")
@@ -1174,6 +1190,11 @@ def get_admin_router() -> Router:
             return
         await callback.answer()
         host_name = callback.data.split("admin_hostkeys_pick_host_")[-1]
+        # Сохраняем контекст текущего хоста, чтобы корректно работать с кнопкой "Назад"
+        try:
+            await state.update_data(hostkeys_host=host_name)
+        except Exception:
+            pass
         keys = get_keys_for_host(host_name)
         await callback.message.edit_text(
             f"🔑 Ключи на хосте {host_name}:",
@@ -1186,6 +1207,11 @@ def get_admin_router() -> Router:
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
+        # Сбрасываем контекст выбранного хоста
+        try:
+            await state.update_data(hostkeys_host=None)
+        except Exception:
+            pass
         hosts = get_all_hosts()
         await callback.message.edit_text(
             "🌍 Выберите хост для просмотра ключей:",

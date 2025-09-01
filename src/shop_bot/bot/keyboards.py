@@ -105,13 +105,17 @@ def create_admin_user_keys_keyboard(user_id: int, keys: list[dict]) -> InlineKey
     builder.adjust(1)
     return builder.as_markup()
 
-def create_admin_key_actions_keyboard(key_id: int) -> InlineKeyboardMarkup:
+def create_admin_key_actions_keyboard(key_id: int, user_id: int | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🌍 Изменить сервер", callback_data=f"admin_key_edit_host_{key_id}")
     builder.button(text="➕ Добавить дни", callback_data=f"admin_key_extend_{key_id}")
     builder.button(text="🗑 Удалить ключ", callback_data=f"admin_key_delete_{key_id}")
     builder.button(text="⬅️ Назад к ключам", callback_data=f"admin_key_back_{key_id}")
-    builder.adjust(2, 2)
+    if user_id is not None:
+        builder.button(text="👤 Перейти к пользователю", callback_data=f"admin_view_user_{user_id}")
+        builder.adjust(2, 2, 1)
+    else:
+        builder.adjust(2, 2)
     return builder.as_markup()
 
 def create_admin_delete_key_confirm_keyboard(key_id: int) -> InlineKeyboardMarkup:
