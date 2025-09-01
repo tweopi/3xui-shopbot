@@ -108,6 +108,29 @@ async def show_main_menu(message: types.Message, edit_message: bool = False):
     else:
         await message.answer(text, reply_markup=keyboard)
 
+async def process_successful_onboarding(callback: types.CallbackQuery, state: FSMContext):
+    """Завершает онбординг: ставит флаг согласия и открывает главное меню."""
+    user_id = callback.from_user.id
+    try:
+        set_terms_agreed(user_id)
+    except Exception as e:
+        logger.error(f"Failed to set_terms_agreed for user {user_id}: {e}")
+    try:
+        await callback.answer()
+    except Exception:
+        pass
+    try:
+        await show_main_menu(callback.message, edit_message=True)
+    except Exception:
+        try:
+            await callback.message.answer("✅ Требования выполнены. Открываю меню...")
+        except Exception:
+            pass
+    try:
+        await state.clear()
+    except Exception:
+        pass
+
 def registration_required(f):
     @wraps(f)
     async def decorated_function(event: types.Update, *args, **kwargs):
