@@ -655,10 +655,10 @@ body.login-page {
 
 .navigation .nav-link .open-tickets-badge {
     position: absolute;
-    top: 0; right: 0;
-    transform: translate(45%, -45%); /* крепим к правому верхнему углу капсулы */
-    width: 22px; /* резервируем место всегда */
-    height: 20px;
+    top: -6px; 
+    right: 10px; /* внутри правого края плашки и не заходит на текст */
+    width: 18px; /* компактный контейнер */
+    height: 18px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
