@@ -630,6 +630,7 @@ body.login-page {
     text-decoration: none;
     margin-right: 4px;
     padding: 6px 12px; /* компактнее, чтобы не раздувалось */
+    padding-right: 32px; /* резерв под бейдж, чтобы текст не скакал */
     height: 36px; /* фиксированная высота плашки */
     line-height: 1; /* исключаем вертикальное расползание */
     border-radius: 999px;
@@ -654,12 +655,25 @@ body.login-page {
 
 .navigation .nav-link .open-tickets-badge {
     position: absolute;
-    top: -6px;
-    right: -6px;
+    top: -8px; /* чуть выше верхнего края капсулы */
+    right: -8px; /* снаружи справа, чтобы не перекрывать текст */
     display: inline-flex;
     align-items: center;
     gap: 6px;
     pointer-events: none; /* не мешаем клику по ссылке */
+    z-index: 1;
+}
+/* нормализуем размер внутреннего badge, чтобы не прыгал */
+.navigation .nav-link .open-tickets-badge .badge {
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 20px;
+    padding: 0 6px;
+    line-height: 1;
+    font-size: .72rem;
 }
 
 /* Кнопки справа — нормализованные стили */

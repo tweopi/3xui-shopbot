@@ -153,8 +153,9 @@ docker-compose up -d
 **Обновить бота до последней версии:**
 
 ```bash
-git pull
-docker-compose down && docker-compose up -d --build
+curl -sSL https://raw.githubusercontent.com/tweopi/3xui-shopbot/main/install.sh | sudo bash
+
+docker-compose down && docker-compose up
 ```
 
 ## 🙌 Баги и предложения
