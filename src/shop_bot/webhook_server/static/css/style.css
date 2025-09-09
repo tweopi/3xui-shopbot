@@ -637,7 +637,9 @@ body.login-page {
     border: 1px solid color-mix(in oklab, var(--primary-color) 26%, var(--border-color));
     position: relative; /* для абсолютного бейджа */
 }
-.navigation .nav-link:has(.open-tickets-badge) { padding-right: 32px; }
+/* Не резервируем место под бейдж — убираем любой дополнительный right padding */
+/* (бейдж остаётся абсолютным и не влияет на ширину кнопки) */
+/* удалено правило padding-right для :has(.open-tickets-badge) */
 .navigation .nav-link:focus { outline: none; box-shadow: none; }
 .navigation .nav-link:active { outline: none; box-shadow: none; }
 .navigation .nav-link:hover {
