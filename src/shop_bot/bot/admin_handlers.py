@@ -3,6 +3,7 @@ import asyncio
 import time
 import uuid
 import re
+import html as html_escape
 
 from aiogram import Bot, Router, F, types
 from aiogram.filters import Command, StateFilter
@@ -899,8 +900,9 @@ def get_admin_router() -> Router:
                     f"Срок: {days} дн.\n"
                 )
                 if connection_link:
-                    notify_text += f"\n🔗 Подписка: {connection_link}"
-                await message.bot.send_message(user_id, notify_text)
+                    cs = html_escape.escape(connection_link)
+                    notify_text += f"\n🔗 Подписка:\n<pre><code>{cs}</code></pre>"
+                await message.bot.send_message(user_id, notify_text, parse_mode='HTML', disable_web_page_preview=True)
             except Exception:
                 pass
         else:

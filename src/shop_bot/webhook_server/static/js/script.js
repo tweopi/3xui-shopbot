@@ -1,4 +1,113 @@
 document.addEventListener('DOMContentLoaded', function () {
+    // CSRF helper (meta -> token)
+    function getCsrfToken(){
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+    // Programmatic toast API
+    window.showToast = function(category, message, delay){
+        try{
+            const cont = document.getElementById('toast-container');
+            if (!cont) return;
+            const el = document.createElement('div');
+            const cat = (category === 'danger' ? 'danger' : (category === 'success' ? 'success' : (category === 'warning' ? 'warning' : 'secondary')));
+            el.className = 'toast fade align-items-center text-bg-' + cat;
+            el.setAttribute('role','alert'); el.setAttribute('aria-live','assertive'); el.setAttribute('aria-atomic','true');
+            el.innerHTML = '<div class="d-flex"><div class="toast-body">'+ (message||'') +'</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>';
+            cont.appendChild(el);
+            new bootstrap.Toast(el, { delay: Math.max(2000, delay||4000), autohide: true }).show();
+        }catch(_){ }
+    }
+    // Global partial refresh by container id
+    window.refreshContainerById = async function(id){
+        const node = document.getElementById(id);
+        if (!node) return;
+        const url = node.getAttribute('data-fetch-url');
+        if (!url) return;
+        try {
+            const resp = await fetch(url, { headers: { 'Accept': 'text/html' }, cache: 'no-store', credentials: 'same-origin' });
+            if (resp.redirected) { window.location.href = resp.url; return; }
+            if (resp.status === 401 || resp.status === 403) { window.location.href = '/login'; return; }
+            if (!resp.ok) return;
+            const html = await resp.text();
+            if (html && html !== node.innerHTML) {
+                // lock height to avoid layout shift
+                const prevH = node.offsetHeight;
+                if (prevH > 0) node.style.minHeight = prevH + 'px';
+                node.classList.add('is-swapping');
+                node.innerHTML = html;
+                try {
+                    node.classList.add('flash');
+                    setTimeout(()=> node.classList.remove('flash'), 600);
+                } catch(_){ }
+                try { initTooltipsWithin(node); } catch(_){ }
+                // Re-bind confirmation/AJAX handlers for newly injected forms
+                try { setupConfirmationForms(node); } catch(_){ }
+                // unlock after transition
+                setTimeout(()=>{ node.style.minHeight = ''; node.classList.remove('is-swapping'); }, 260);
+            }
+        } catch(_){ }
+    }
+    // Init tooltips helpers
+    function initTooltipsWithin(root){
+        if (!window.bootstrap) return;
+        const scope = root || document;
+        // уничтожаем старые тултипы, если есть data-bs-toggle
+        scope.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el=>{
+            try { bootstrap.Tooltip.getInstance(el)?.dispose(); } catch(_){ }
+        });
+        const targets = scope.querySelectorAll('[data-bs-toggle="tooltip"], .btn[title], a.btn[title]');
+        targets.forEach(el=>{
+            try { new bootstrap.Tooltip(el, { container: 'body' }); } catch(_){ }
+        });
+    }
+    // Attach CSRF token to all POST forms
+    function initializeCsrfForForms() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        const token = meta ? meta.getAttribute('content') : null;
+        if (!token) return;
+
+        document.querySelectorAll('form').forEach(form => {
+            const method = (form.getAttribute('method') || '').toLowerCase();
+            if (method !== 'post') return;
+            form.addEventListener('submit', function () {
+                if (form.querySelector('input[name="csrf_token"]')) return;
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'csrf_token';
+                input.value = token;
+                form.appendChild(input);
+            });
+        });
+    }
+    // Theme toggle: persists selection and updates <html data-bs-theme>
+    function initializeThemeToggle() {
+        const THEME_KEY = 'ui_theme';
+        const root = document.documentElement; // <html>
+        const btn = document.getElementById('theme-toggle');
+        const label = btn ? btn.querySelector('.theme-label') : null;
+
+        function applyTheme(theme) {
+            const next = (theme === 'light' || theme === 'dark') ? theme : 'dark';
+            root.setAttribute('data-bs-theme', next);
+            try { localStorage.setItem(THEME_KEY, next); } catch (_) {}
+            if (label) label.textContent = next === 'dark' ? 'Тёмная' : 'Светлая';
+        }
+
+        // Get saved or default theme
+        let saved = 'dark';
+        try { saved = localStorage.getItem(THEME_KEY) || 'dark'; } catch (_) {}
+        applyTheme(saved);
+
+        if (btn) {
+            btn.addEventListener('click', function () {
+                const current = root.getAttribute('data-bs-theme') || 'dark';
+                const next = current === 'dark' ? 'light' : 'dark';
+                applyTheme(next);
+            });
+        }
+    }
+
     function initializePasswordToggles() {
         const togglePasswordButtons = document.querySelectorAll('.toggle-password');
         togglePasswordButtons.forEach(button => {
@@ -11,10 +120,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 if (passwordInput.type === 'password') {
                     passwordInput.type = 'text';
-                    this.textContent = '🙈';
+                    this.textContent = '';
                 } else {
                     passwordInput.type = 'password';
-                    this.textContent = '👁️';
+                    this.textContent = '';
                 }
             });
         });
@@ -29,7 +138,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 const button = startForm.querySelector('button[type="submit"]');
                 if (button) {
                     button.disabled = true;
-                    button.textContent = 'Запускаем...';
+                    button.textContent = '...';
                 }
             });
         }
@@ -39,23 +148,56 @@ document.addEventListener('DOMContentLoaded', function () {
                 const button = stopForm.querySelector('button[type="submit"]');
                 if (button) {
                     button.disabled = true;
-                    button.textContent = 'Останавливаем...';
+                    button.textContent = '...';
                 }
             });
         }
     }
 
-    function setupConfirmationForms() {
-        const confirmationForms = document.querySelectorAll('form[data-confirm]');
-        confirmationForms.forEach(form => {
-            form.addEventListener('submit', function (event) {
+    function setupConfirmationForms(root) {
+        const scope = root || document;
+        const forms = scope.querySelectorAll('form[data-confirm]');
+        forms.forEach(form => {
+            form.addEventListener('submit', async function (event) {
                 const message = form.getAttribute('data-confirm');
                 if (!confirm(message)) {
                     event.preventDefault();
+                    return;
+                }
+                // AJAX delete
+                if (form.getAttribute('data-ajax') === 'delete') {
+                    event.preventDefault();
+                    try {
+                        const fd = new FormData(form);
+                        // ensure csrf present
+                        if (!fd.get('csrf_token')){
+                            const t = getCsrfToken();
+                            if (t) fd.append('csrf_token', t);
+                        }
+                        const resp = await fetch(form.action, { method: 'POST', body: fd, credentials: 'same-origin' });
+                        if (resp.ok) {
+                            const action = form.getAttribute('data-action');
+                            const msg = action === 'revoke-keys' ? 'Ключи отозваны' : 'Удалено';
+                            try { window.showToast('success', msg); } catch(_){ }
+                            const targetId = form.getAttribute('data-refresh-target');
+                            if (targetId) { try { await window.refreshContainerById(targetId); } catch(_){ } }
+                        } else {
+                            const action = form.getAttribute('data-action');
+                            const msg = action === 'revoke-keys' ? 'Не удалось отозвать ключи' : 'Не удалось удалить';
+                            try { window.showToast('danger', msg); } catch(_){ }
+                        }
+                    } catch(_){ try { window.showToast('danger', 'Ошибка удаления'); } catch(__){} }
                 }
             });
         });
     }
+
+    // Center all modals by default (unless already centered)
+    document.querySelectorAll('.modal .modal-dialog').forEach(dlg => {
+        if (!dlg.classList.contains('modal-dialog-centered')) {
+            dlg.classList.add('modal-dialog-centered');
+        }
+    });
 
     function initializeDashboardCharts() {
         const usersChartCanvas = document.getElementById('newUsersChart');
@@ -100,7 +242,7 @@ document.addEventListener('DOMContentLoaded', function () {
             chart.options.scales.y.ticks.font.size = isMobile ? 10 : 12;
             chart.options.plugins.legend.labels.font.size = isMobile ? 12 : 14;
             chart.options.scales.x.ticks.maxTicksLimit = isMobile ? 8 : 15;
-            // Скрываем метки и легенду при ширине <= 470px
+            // 
             chart.options.scales.x.ticks.display = !isVerySmall;
             chart.options.scales.y.ticks.display = !isVerySmall;
             chart.options.plugins.legend.display = !isVerySmall;
@@ -110,7 +252,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const usersCtx = usersChartCanvas.getContext('2d');
         const usersChartData = prepareChartData(
             CHART_DATA.users,
-            'Новых пользователей в день',
+            'Новые пользователи',
             '#007bff'
         );
         const usersChart = new Chart(usersCtx, {
@@ -125,7 +267,7 @@ document.addEventListener('DOMContentLoaded', function () {
                             font: {
                                 size: window.innerWidth <= 768 ? 10 : 12
                             },
-                            display: window.innerWidth > 470
+                            display: true
                         }
                     },
                     x: {
@@ -136,7 +278,7 @@ document.addEventListener('DOMContentLoaded', function () {
                             maxTicksLimit: window.innerWidth <= 768 ? 8 : 15,
                             maxRotation: 45,
                             minRotation: 45,
-                            display: window.innerWidth > 470
+                            display: true
                         }
                     }
                 },
@@ -148,11 +290,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 },
                 plugins: {
                     legend: {
+                        display: true,
                         labels: {
                             font: {
                                 size: window.innerWidth <= 768 ? 12 : 14
-                            },
-                            display: window.innerWidth > 470
+                            }
                         }
                     }
                 }
@@ -165,7 +307,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const keysCtx = keysChartCanvas.getContext('2d');
         const keysChartData = prepareChartData(
             CHART_DATA.keys,
-            'Новых ключей в день',
+            'Новые ключи',
             '#28a745'
         );
         const keysChart = new Chart(keysCtx, {
@@ -218,6 +360,27 @@ document.addEventListener('DOMContentLoaded', function () {
             updateChartFontsAndLabels(usersChart);
             updateChartFontsAndLabels(keysChart);
         });
+
+        // --- Auto refresh charts data without page reload ---
+        async function refreshCharts(){
+            try{
+                const resp = await fetch('/dashboard/charts.json', { headers: { 'Accept': 'application/json' }, credentials: 'same-origin', cache: 'no-store' });
+                if (resp.redirected) { window.location.href = resp.url; return; }
+                if (resp.status === 401 || resp.status === 403) { window.location.href = '/login'; return; }
+                if (!resp.ok) return;
+                const fresh = await resp.json();
+                if (!fresh) return;
+                const newUsers = prepareChartData(fresh.users, 'Новые пользователи', '#007bff');
+                const newKeys = prepareChartData(fresh.keys, 'Новые ключи', '#28a745');
+                usersChart.data.labels = newUsers.labels;
+                usersChart.data.datasets[0].data = newUsers.datasets[0].data;
+                keysChart.data.labels = newKeys.labels;
+                keysChart.data.datasets[0].data = newKeys.datasets[0].data;
+                usersChart.update('none');
+                keysChart.update('none');
+            }catch(_){/* noop */}
+        }
+        setInterval(refreshCharts, 10000);
     }
 
     function initializeTicketAutoRefresh() {
@@ -258,21 +421,21 @@ document.addEventListener('DOMContentLoaded', function () {
 
         function updateStatus(status) {
             if (status === 'open') {
-                statusEl.innerHTML = '<span class="indicator indicator-lg indicator--green pulse"></span><span class="badge badge-green">Открыт</span>';
+                statusEl.innerHTML = '<span class="status-dot status-dot-animated bg-green"></span><span class="badge bg-green ms-1">Открыт</span>';
                 const textarea = document.getElementById('reply-text');
                 const replyBtn = document.getElementById('reply-btn');
                 if (textarea) textarea.disabled = false;
                 if (replyBtn) replyBtn.disabled = false;
                 const toggleBtn = document.getElementById('toggle-status-btn');
-                if (toggleBtn) { toggleBtn.textContent = 'Закрыть'; toggleBtn.value = 'close'; toggleBtn.className = 'button button-danger'; }
+                if (toggleBtn) { toggleBtn.textContent = 'Закрыть'; toggleBtn.value = 'close'; toggleBtn.className = 'btn btn-danger'; }
             } else {
-                statusEl.innerHTML = '<span class="indicator indicator-lg indicator--gray"></span><span class="badge">Закрыт</span>';
+                statusEl.innerHTML = '<span class="status-dot"></span><span class="badge ms-1">Закрыт</span>';
                 const textarea = document.getElementById('reply-text');
                 const replyBtn = document.getElementById('reply-btn');
                 if (textarea) textarea.disabled = true;
                 if (replyBtn) replyBtn.disabled = true;
                 const toggleBtn = document.getElementById('toggle-status-btn');
-                if (toggleBtn) { toggleBtn.textContent = 'Открыть'; toggleBtn.value = 'open'; toggleBtn.className = 'button button-start'; }
+                if (toggleBtn) { toggleBtn.textContent = 'Открыть'; toggleBtn.value = 'open'; toggleBtn.className = 'btn btn-success'; }
             }
         }
 
@@ -285,10 +448,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 const key = JSON.stringify({ len: items.length, last: items[items.length - 1] || null, status: data.status });
                 if (key === lastKey) return;
 
-                // Remember scroll position to decide autoscroll
                 const nearBottom = (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight) < 60;
 
-                // Render messages safely
                 chatBox.innerHTML = '';
                 if (items.length === 0) {
                     const p = document.createElement('p');
@@ -315,48 +476,194 @@ document.addEventListener('DOMContentLoaded', function () {
                 lastKey = key;
                 lastCount = items.length;
             } catch (e) {
-                // no-op: silent network errors
+                // silent
             }
         }
 
-        // Initial fetch and periodic polling
         fetchAndRender();
         const interval = setInterval(fetchAndRender, 2500);
-
-        // Clear interval when navigating away
         window.addEventListener('beforeunload', () => clearInterval(interval));
     }
 
+    // Глобальная авто-перезагрузка отключена по требованию: оставляем только точечные авто-обновления без reload
     function initializeGlobalAutoRefresh() {
-        const page = document.body.getAttribute('data-page') || '';
-        // Исключаем страницу настроек и страницу тикета (у тикета свой пуллинг)
-        if (page === 'settings_page' || page === 'support_ticket_page') return;
+        /* disabled */
+    }
 
-        let typing = false;
-        document.addEventListener('keydown', (e) => {
-            const t = e.target;
-            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
-                typing = true;
-                setTimeout(() => typing = false, 1500);
+    // Черновая схема выборочного автообновления блоков по data-fetch-url (под будущие включения)
+    function initializeSoftAutoUpdate() {
+        const nodes = Array.from(document.querySelectorAll('[data-fetch-url]'));
+        if (!nodes.length) return;
+        nodes.forEach(node => {
+            const url = node.getAttribute('data-fetch-url');
+            const interval = Number(node.getAttribute('data-fetch-interval')||'8000');
+            if (!url) return;
+            let timer = null;
+            async function tick(){
+                try{
+                    const resp = await fetch(url, { headers: { 'Accept': 'text/html' }, cache: 'no-store', credentials: 'same-origin' });
+                    if (resp.redirected) { window.location.href = resp.url; return; }
+                    if (resp.status === 401 || resp.status === 403) { window.location.href = '/login'; return; }
+                    if (!resp.ok) return;
+                    const html = await resp.text();
+                    if (html && html !== node.innerHTML) {
+                        const prevH = node.offsetHeight;
+                        if (prevH > 0) node.style.minHeight = prevH + 'px';
+                        node.classList.add('is-swapping');
+                        node.innerHTML = html;
+                        try {
+                            node.classList.add('flash');
+                            setTimeout(()=> node.classList.remove('flash'), 600);
+                        } catch(_){ }
+                        // re-init tooltips and confirmation handlers for new content
+                        try { initTooltipsWithin(node); } catch(_){ }
+                        try { setupConfirmationForms(node); } catch(_){ }
+                        setTimeout(()=>{ node.style.minHeight = ''; node.classList.remove('is-swapping'); }, 260);
+                    }
+                }catch(_){/* noop */}
             }
+            tick();
+            timer = setInterval(tick, Math.max(4000, interval));
+            node.addEventListener('soft-update-stop', ()=>{ if (timer){ clearInterval(timer); timer=null; } });
+            window.addEventListener('beforeunload', ()=>{ if (timer){ clearInterval(timer); timer=null; } });
         });
+    }
 
-        function tryReload() {
-            if (document.hidden) return; // вкладка не активна
-            if (typing) return;          // пользователь печатает
-            if (performance.now() < 3000) return; // не перезагружать сразу после загрузки
-            location.reload();
+    // Settings tabs: show/hide sections by hash and set active nav link
+    function initializeSettingsTabs() {
+        const nav = document.querySelector('.nav.nav-pills');
+        const container = document.querySelector('.settings-container');
+        if (!nav || !container) return; // not on settings page
+
+        const links = Array.from(nav.querySelectorAll('a.nav-link'));
+        // Собираем все секции автоматически
+        const sections = Array.from(document.querySelectorAll('.settings-section'));
+        const rightCol = document.querySelector('.settings-column-right');
+
+        function show(targetHash) {
+            const hash = (targetHash && targetHash.startsWith('#')) ? targetHash : '#panel';
+            // зафиксируем высоту правой колонки на время анимации, чтобы не было "рывков"
+            let currentVisible = document.querySelector('.settings-column-right .settings-section:not(.is-hidden)');
+            const currentHeight = currentVisible ? currentVisible.offsetHeight : 0;
+            const targetEl = document.querySelector(hash);
+            const targetHeight = targetEl ? targetEl.offsetHeight : 0;
+            if (rightCol) {
+                const h = Math.max(currentHeight, targetHeight);
+                if (h > 0) rightCol.style.minHeight = h + 'px';
+            }
+            sections.forEach(sec => {
+                if ('#' + sec.id === hash) {
+                    sec.classList.remove('is-hidden');
+                } else {
+                    sec.classList.add('is-hidden');
+                }
+            });
+            links.forEach(a => {
+                if (a.getAttribute('href') === hash) a.classList.add('active');
+                else a.classList.remove('active');
+            });
+            // Если не нашли секцию по hash — показать первую существующую
+            const anyVisible = sections.some(sec => !sec.classList.contains('is-hidden'));
+            if (!anyVisible && sections.length) {
+                sections[0].classList.remove('is-hidden');
+            }
+            // снять фиксацию высоты после завершения анимации скрытия/показа
+            if (rightCol) setTimeout(() => { rightCol.style.minHeight = ''; }, 260);
+
+            // Единый макет для вкладки Хосты: скрываем правую колонку, растягиваем левую
+            const leftCol = document.querySelector('.settings-column-left');
+            if (hash === '#hosts') {
+                if (rightCol) rightCol.style.display = 'none';
+                if (leftCol) {
+                    leftCol.style.flex = '1 1 100%';
+                    leftCol.style.minWidth = '0';
+                }
+            } else {
+                if (rightCol) rightCol.style.display = '';
+                if (leftCol) {
+                    leftCol.style.flex = '';
+                    leftCol.style.minWidth = '';
+                }
+            }
         }
 
-        const intervalMs = page === 'dashboard_page' ? 8000 : 10000;
-        const interval = setInterval(tryReload, intervalMs);
-        window.addEventListener('beforeunload', () => clearInterval(interval));
+        // Click navigation без скачка страницы: используем replaceState и синхронизируем ?tab
+        links.forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                const href = a.getAttribute('href');
+                if (!href) return;
+                const y = window.scrollY;
+                show(href);
+                // Обновим адресную строку (и hash, и ?tab), не триггеря прокрутку
+                const tabName = href.startsWith('#') ? href.slice(1) : href;
+                try { history.replaceState(null, '', `?tab=${encodeURIComponent(tabName)}${href}`); } catch(_) {}
+                // восстановим исходную позицию
+                window.scrollTo(0, y);
+            });
+        });
+
+        // Обработка внешнего изменения hash (ручной ввод) без скачка
+        window.addEventListener('hashchange', () => {
+            const y = window.scrollY;
+            show(location.hash);
+            window.scrollTo(0, y);
+        });
+
+        // Initial state (без скачка): поддержка ?tab=...
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get('tab');
+        const initialHash = tabParam ? `#${tabParam}` : (location.hash || '#panel');
+        show(initialHash);
+        // Синхронизируем URL, чтобы и hash, и ?tab были установлены
+        try {
+            const tabName = initialHash.startsWith('#') ? initialHash.slice(1) : initialHash;
+            history.replaceState(null, '', `?tab=${encodeURIComponent(tabName)}${initialHash}`);
+        } catch(_) {}
     }
 
+    // Initialize modules once DOM is ready
+    initTooltipsWithin(document);
     initializePasswordToggles();
     setupBotControlForms();
     setupConfirmationForms();
     initializeDashboardCharts();
     initializeTicketAutoRefresh();
-    initializeGlobalAutoRefresh();
+    // Автоперезагрузка выключена: initializeGlobalAutoRefresh();
+    initializeSoftAutoUpdate();
+    initializeSettingsTabs();
+    initializeThemeToggle();
+    initializeCsrfForForms();
+
+    // Inline edit rows (URL/Имя хоста)
+    document.querySelectorAll('[data-edit-row]').forEach(row => {
+        const input = row.querySelector('[data-edit-target]');
+        const btnEdit = row.querySelector('[data-action="edit"]');
+        const btnSave = row.querySelector('[data-action="save"]');
+        const btnCancel = row.querySelector('[data-action="cancel"]');
+        if (!input || !btnEdit || !btnSave || !btnCancel) return;
+
+        const orig = { value: input.value };
+        function setMode(editing) {
+            if (editing) {
+                input.readOnly = false;
+                input.classList.add('is-editing');
+                btnEdit.classList.add('d-none');
+                btnSave.classList.remove('d-none');
+                btnCancel.classList.remove('d-none');
+                input.focus();
+                try { input.setSelectionRange(input.value.length, input.value.length); } catch(_) {}
+            } else {
+                input.readOnly = true;
+                input.classList.remove('is-editing');
+                btnEdit.classList.remove('d-none');
+                btnSave.classList.add('d-none');
+                btnCancel.classList.add('d-none');
+            }
+        }
+
+        btnEdit.addEventListener('click', () => setMode(true));
+        btnCancel.addEventListener('click', () => { input.value = orig.value; setMode(false); });
+        row.addEventListener('submit', () => { orig.value = input.value; setMode(false); });
+    });
 });

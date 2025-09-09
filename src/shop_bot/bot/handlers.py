@@ -1795,13 +1795,37 @@ async def process_successful_payment(bot: Bot, metadata: dict):
 
         # Начисляем реферальное вознаграждение (оплата с реферального баланса больше не используется)
         if referrer_id:
-            percentage = Decimal(get_setting("referral_percentage") or "0")
-            reward = (Decimal(str(price)) * percentage / 100).quantize(Decimal("0.01"))
+            try:
+                referrer_id = int(referrer_id)
+            except Exception:
+                logger.warning(f"Referral: invalid referrer_id={referrer_id} for user {user_id}")
+                referrer_id = None
+        if referrer_id:
+            # Либо фиксированный бонус, либо процент — в зависимости от настроек панели
+            try:
+                fixed_enabled = (get_setting("enable_fixed_referral_bonus") or "false").lower() == "true"
+            except Exception:
+                fixed_enabled = False
+            reward = Decimal("0")
+            if fixed_enabled:
+                try:
+                    amount_raw = get_setting("fixed_referral_bonus_amount") or "50"
+                    reward = Decimal(str(amount_raw)).quantize(Decimal("0.01"))
+                except Exception:
+                    reward = Decimal("50.00")
+            else:
+                try:
+                    percentage = Decimal(get_setting("referral_percentage") or "0")
+                except Exception:
+                    percentage = Decimal("0")
+                reward = (Decimal(str(price)) * percentage / 100).quantize(Decimal("0.01"))
+            logger.info(f"Referral: user={user_id}, referrer={referrer_id}, fixed_enabled={fixed_enabled}, reward={float(reward):.2f}")
             if float(reward) > 0:
                 # теперь начисляем в основной баланс
                 try:
                     ok = add_to_balance(referrer_id, float(reward))
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Referral: add_to_balance failed for referrer {referrer_id}: {e}")
                     ok = False
                 # увеличиваем суммарный заработок по рефералке
                 try:
@@ -1814,7 +1838,9 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                         await bot.send_message(
                             referrer_id,
                             f"🎉 Ваш реферал @{referrer_username} совершил оплату на {price:.2f} RUB.\n"
-                            f"💰 Вам начислено {float(reward):.2f} RUB на баланс администратором.")
+                            f"💰 Вам начислено {float(reward):.2f} RUB на ваш баланс.")
+                    else:
+                        logger.warning(f"Referral: balance was not updated for referrer {referrer_id}, no notification sent")
                 except Exception as e:
                     logger.warning(f"Could not send referral reward notification to {referrer_id}: {e}")
 

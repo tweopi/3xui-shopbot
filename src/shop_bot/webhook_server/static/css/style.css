@@ -1,12 +1,194 @@
+/* Smooth swap for partial updates */
+.is-swapping {
+  transition: min-height .24s ease;
+}
+
+/* ===== Modals polish (dark theme) ===== */
+.modal.modal-blur .modal-dialog {
+  /* немного увеличим радиус и сгладим края */
+  margin: 1.25rem auto; /* auto по горизонтали — строго по центру */
+}
+.modal .modal-content {
+  background-color: var(--bg-surface);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  overflow: hidden; /* важно: чтобы углы и фон были ровные */
+}
+.modal .modal-header,
+.modal .modal-body,
+.modal .modal-footer {
+  background-color: var(--bg-surface);
+}
+.modal .modal-header { border-bottom: 1px solid rgba(255,255,255,0.06); }
+.modal .modal-footer { border-top: 1px solid rgba(255,255,255,0.06); }
+
+/* Поля в модалках: равномерные отступы и ровные скругления */
+.modal .form-control {
+  background-color: #11161c;
+  border-color: #2a2f36;
+  color: #e6e9ef;
+}
+.modal .form-control:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 .1rem rgba(174, 62, 201, 0.25);
+}
+
+/* Кнопки в модалках */
+.modal .btn.btn-primary {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+.modal .btn.btn-primary:hover,
+.modal .btn.btn-primary:focus { filter: brightness(1.06); }
+.modal .btn.btn-outline-secondary { color: #ced4da; border-color: #495057; }
+.modal .btn.btn-outline-secondary:hover,
+.modal .btn.btn-outline-secondary:focus { background: rgba(206,212,218,0.08); }
+
+.flash {
+  animation: flashFade .6s ease;
+}
+
+@keyframes flashFade {
+  0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.18) inset; }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0) inset; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-swapping { transition: none; }
+  .flash { animation: none; }
+}
+
+/* Accented mini buttons colors on dark background */
+.btn.btn-sm.btn-glass i { color: inherit; }
+
+.btn.btn-sm.btn-glass.btn-outline-warning {
+  color: var(--warning-color) !important;
+  border-color: color-mix(in oklab, var(--warning-color) 70%, black) !important;
+}
+.btn.btn-sm.btn-glass.btn-outline-warning:hover,
+.btn.btn-sm.btn-glass.btn-outline-warning:focus {
+  background: color-mix(in oklab, var(--warning-color) 12%, transparent) !important;
+  border-color: var(--warning-color) !important;
+}
+
+.btn.btn-sm.btn-glass.btn-outline-success {
+  color: var(--success-color) !important;
+  border-color: color-mix(in oklab, var(--success-color) 70%, black) !important;
+}
+.btn.btn-sm.btn-glass.btn-outline-success:hover,
+.btn.btn-sm.btn-glass.btn-outline-success:focus {
+  background: color-mix(in oklab, var(--success-color) 14%, transparent) !important;
+  border-color: var(--success-color) !important;
+}
+
+.btn.btn-sm.btn-glass.btn-outline-secondary {
+  color: #adb5bd !important;
+  border-color: #495057 !important;
+}
+.btn.btn-sm.btn-glass.btn-outline-secondary:hover,
+.btn.btn-sm.btn-glass.btn-outline-secondary:focus {
+  background: rgba(173,181,189,0.12) !important;
+}
+
+.btn.btn-sm.btn-glass.btn-danger {
+  color: #ff6b6b !important;
+  border-color: color-mix(in oklab, #ff6b6b 70%, black) !important;
+}
+.btn.btn-sm.btn-glass.btn-danger:hover,
+.btn.btn-sm.btn-glass.btn-danger:focus {
+  background: rgba(255,107,107,0.12) !important;
+  border-color: #ff6b6b !important;
+}
+
+/* ===== Liquid matte glass buttons ===== */
+.btn-glass {
+  background: rgba(255,255,255,0.04) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  backdrop-filter: saturate(120%) blur(8px);
+  -webkit-backdrop-filter: saturate(120%) blur(8px);
+  color: #e6e9ef !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25), inset 0 0 0 1px rgba(255,255,255,0.02);
+  transition: background .2s ease, border-color .2s ease, box-shadow .2s ease, transform .02s ease;
+}
+.btn-glass:hover,
+.btn-glass:focus {
+  background: rgba(255,255,255,0.07) !important;
+  border-color: rgba(255,255,255,0.14) !important;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.03);
+}
+.btn-glass:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.35) inset;
+}
+
+/* Цветные заливки для стеклянных кнопок */
+.btn-glass.btn-primary { background: color-mix(in oklab, var(--primary-color) 18%, transparent) !important; border-color: color-mix(in oklab, var(--primary-color) 60%, black) !important; }
+.btn-glass.btn-primary:hover { background: color-mix(in oklab, var(--primary-color) 26%, transparent) !important; }
+
+.btn-glass.btn-info { color: #74c0fc !important; background: color-mix(in oklab, #74c0fc 14%, transparent) !important; border-color: color-mix(in oklab, #74c0fc 60%, black) !important; }
+.btn-glass.btn-info:hover { background: color-mix(in oklab, #74c0fc 22%, transparent) !important; }
+
+.btn-glass.btn-warning { color: var(--warning-color) !important; background: color-mix(in oklab, var(--warning-color) 14%, transparent) !important; border-color: color-mix(in oklab, var(--warning-color) 60%, black) !important; }
+.btn-glass.btn-warning:hover { background: color-mix(in oklab, var(--warning-color) 22%, transparent) !important; }
+
+.btn-glass.btn-success { color: var(--success-color) !important; background: color-mix(in oklab, var(--success-color) 14%, transparent) !important; border-color: color-mix(in oklab, var(--success-color) 60%, black) !important; }
+.btn-glass.btn-success:hover { background: color-mix(in oklab, var(--success-color) 22%, transparent) !important; }
+
+.btn-glass.btn-danger { color: var(--danger-color) !important; background: color-mix(in oklab, var(--danger-color) 14%, transparent) !important; border-color: color-mix(in oklab, var(--danger-color) 60%, black) !important; }
+.btn-glass.btn-danger:hover { background: color-mix(in oklab, var(--danger-color) 22%, transparent) !important; }
 :root {
-	--primary-color: #4dabf7;
+	/* Брендовые переменные проекта */
+	--primary-color: #ae3ec9; /* grape */
 	--success-color: #51cf66;
 	--danger-color: #ff6b6b;
-	--warning-color: #ff6b6b;
-	--light-color: #e9ecef;
-	--dark-color: #212529;
-	--border-color: #495057;
-	--body-bg: #212529;
+	--warning-color: #ff922b;
+
+	/* Базовые цвета (по умолчанию тёмная тема) */
+	--bg-page: #0f1115;
+	--bg-surface: #1b1f24;
+	--bg-card: #23272c;
+	--text-primary: #e9ecef;
+	--text-muted: #adb5bd;
+	--border-color: rgba(255, 255, 255, 0.08);
+
+	/* Переопределение переменных Tabler/Bootstrap под бренд */
+	--tblr-primary: var(--primary-color);
+	--bs-primary: var(--primary-color);
+
+	/* Масштаб интерфейса */
+	--ui-font-scale: 0.97; /* чуть меньше общая типографика */
+	--ui-radius: 12px;
+}
+
+/* Светлая тема */
+[data-bs-theme='light'] {
+	--bg-page: #f6f8fb;
+	--bg-surface: #ffffff;
+	--bg-card: #ffffff;
+	--text-primary: #212529;
+	--text-muted: #5f6b7a;
+	--border-color: rgba(0, 0, 0, 0.08);
+	--tblr-primary: var(--primary-color);
+	--bs-primary: var(--primary-color);
+    --accent-1: color-mix(in oklab, var(--primary-color) 16%, transparent);
+    --accent-2: color-mix(in oklab, #3e8cc9 12%, transparent);
+    --accent-3: color-mix(in oklab, #3ec996 10%, transparent);
+}
+
+/* Тёмная тема */
+[data-bs-theme='dark'] {
+	--bg-page: #0f1115;
+	--bg-surface: #1b1f24;
+	--bg-card: #23272c;
+	--text-primary: #e9ecef;
+	--text-muted: #adb5bd;
+	--border-color: rgba(255, 255, 255, 0.08);
+	--tblr-primary: var(--primary-color);
+	--bs-primary: var(--primary-color);
+    /* Акцентные пятна для анимированного фона (тёмная тема) */
+    --accent-1: color-mix(in oklab, var(--primary-color) 18%, transparent);
+    --accent-2: color-mix(in oklab, #3e8cc9 14%, transparent);
+    --accent-3: color-mix(in oklab, #3ec996 12%, transparent);
 }
 
 * {
@@ -14,41 +196,122 @@
 	margin: 0;
 	padding: 0;
 }
-.bm {
-	display: none;
-}
+.bm { display: none; position: absolute; right: 12px; top: 10px; }
 #burger {
 	display: none;
 }
+html, body { height: 100%; font-size: calc(16px * var(--ui-font-scale)); }
+/* Предотвращаем горизонтальный рывок из-за появления/скрытия вертикального скроллбара */
+html { scrollbar-gutter: stable; }
+/* Когда открыта модалка, Bootstrap добавляет padding-right к body под ширину скроллбара — отключим это, так как у нас стабилен gutter */
+.modal-open { padding-right: 0 !important; }
+/* Разрешим внутренняя прокрутка в модалке, а не смещение всей страницы */
+.modal { overflow-y: auto; }
+
 body {
 	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
 		'Helvetica Neue', Arial, sans-serif;
-	background-color: var(--body-bg);
-	color: var(--light-color);
+	background: var(--bg-page);
+	color: var(--text-primary);
 	line-height: 1.6;
-	padding: 20px;
+	padding: 0; /* Tabler сам управляет отступами контейнера */
 }
 
-.container {
-	max-width: 80%;
-	margin: 0 auto;
-	background: #2d3238;
-	padding: 30px;
-	border-radius: 8px;
-	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+/* Виньетка-обрамление по краям экрана */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04), inset 0 0 140px rgba(0,0,0,0.35);
+    z-index: 0;
 }
+
+/* более мягкая виньетка в светлой теме */
+html[data-bs-theme='light'] body::before { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06), inset 0 0 120px rgba(0,0,0,0.12); }
+
+/* Градиентная подложка поверх фона — зависит от темы */
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    /* Aurora: конусный градиент + плавающие световые пятна */
+    background:
+        /* базовый перелив (вращающийся conic) */
+        conic-gradient(from var(--aurora-rot, 0deg) at 50% 50%,
+          color-mix(in oklab, var(--primary-color) 12%, transparent) 0deg,
+          color-mix(in oklab, #3e8cc9 12%, transparent) 120deg,
+          color-mix(in oklab, #3ec996 10%, transparent) 240deg,
+          color-mix(in oklab, var(--primary-color) 12%, transparent) 360deg
+        ),
+        /* плавающие мягкие пятна поверх */
+        radial-gradient(900px 700px at var(--aurora-x1, 20%) var(--aurora-y1, 20%), color-mix(in oklab, var(--accent-1) 90%, transparent) 0%, transparent 60%),
+        radial-gradient(1100px 800px at var(--aurora-x2, 80%) var(--aurora-y2, 30%), color-mix(in oklab, var(--accent-2) 90%, transparent) 0%, transparent 64%),
+        radial-gradient(1000px 700px at var(--aurora-x3, 60%) var(--aurora-y3, 75%), color-mix(in oklab, var(--accent-3) 90%, transparent) 0%, transparent 64%);
+    z-index: 0; /* выше фонового цвета body, но ниже контента */
+}
+
+/* Aurora анимация: позиция пятен + вращение conic слоя */
+@keyframes auroraMove {
+  0%   { --aurora-x1: 15%; --aurora-y1: 20%; --aurora-x2: 82%; --aurora-y2: 25%; --aurora-x3: 62%; --aurora-y3: 78%; --aurora-rot: 0deg; }
+  25%  { --aurora-x1: 28%; --aurora-y1: 30%; --aurora-x2: 74%; --aurora-y2: 35%; --aurora-x3: 58%; --aurora-y3: 68%; --aurora-rot: 90deg; }
+  50%  { --aurora-x1: 42%; --aurora-y1: 22%; --aurora-x2: 68%; --aurora-y2: 20%; --aurora-x3: 52%; --aurora-y3: 60%; --aurora-rot: 180deg; }
+  75%  { --aurora-x1: 32%; --aurora-y1: 12%; --aurora-x2: 60%; --aurora-y2: 28%; --aurora-x3: 56%; --aurora-y3: 72%; --aurora-rot: 270deg; }
+  100% { --aurora-x1: 15%; --aurora-y1: 20%; --aurora-x2: 82%; --aurora-y2: 25%; --aurora-x3: 62%; --aurora-y3: 78%; --aurora-rot: 360deg; }
+}
+
+body::after {
+  opacity: .32;
+  animation: auroraMove 42s ease-in-out infinite;
+  will-change: background, filter;
+  filter: saturate(118%) brightness(106%);
+}
+
+/* Уважение к настройке "уменьшить движение" */
+@media (prefers-reduced-motion: reduce) {
+  body::after { animation: none; opacity: .16; }
+}
+
+/* Центрирование модалок без нарушения анимации Bootstrap */
+/* Не трогаем display у .modal, чтобы Bootstrap мог плавно скрывать через .fade */
+.modal .modal-dialog { margin: 0.5rem auto; }
+/* Чуть более плавный переход (учитываем opacity и transform) */
+.modal.fade .modal-dialog { transition: transform .3s ease-out, opacity .2s ease; }
+
+.container {
+    max-width: 1680px; /* шире интерфейс */
+    min-height: calc(100vh - 48px);
+    margin: 28px auto;
+    background: transparent;
+    padding: 0 28px;
+}
+
+/* Брендинг в шапке */
+.main-header { position: relative; display:flex; align-items:center; justify-content: space-between; gap: 16px; }
+.brand { display:flex; align-items:center; gap:12px; }
+.brand .brand-link { display:flex; align-items:center; gap:10px; text-decoration:none; }
+.brand #brand-title { display:flex; align-items:center; line-height:1; margin:0; padding:0; }
+.brand img { height: 56px; width: auto; border-radius: var(--ui-radius); display:block; object-fit: contain; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.25)); }
+.brand span { font-weight: 800; font-size: 1.06rem; letter-spacing: .25px; line-height: 1; }
+.navigation { display:flex; align-items:center; gap: 14px; flex: 1 1 auto; justify-content: center; }
+.navigation .nav-link { padding: 6px 12px; border-radius: 999px; }
+.header-controls { display:flex; align-items:center; gap: 10px; }
+#brand-edit { padding: 2px 8px !important; border-radius: 999px !important; }
+/* чтобы кнопка-карандаш была по центру по высоте логотипа/заголовка */
+.brand #brand-edit { align-self: center; }
 
 h1 {
 	text-align: center;
 	margin-bottom: 30px;
-	color: var(--light-color);
+	color: var(--text-primary);
 }
 
 h2 {
 	color: var(--primary-color);
-	border-bottom: 2px solid var(--border-color);
-	padding-bottom: 10px;
-	margin-bottom: 20px;
+	border-bottom: 1px solid var(--border-color);
+	padding-bottom: 8px;
+	margin: 16px 0 16px;
 }
 
 h3 {
@@ -74,7 +337,7 @@ h4 {
 	display: block;
 	margin-bottom: 8px;
 	font-weight: 600;
-	color: var(--light-color);
+	color: var(--text-primary);
 }
 
 .form-group input[type='text'],
@@ -84,13 +347,13 @@ h4 {
 .form-group select,
 .form-group textarea {
 	width: 100%;
-	padding: 12px;
+	padding: 11px;
 	border: 1px solid var(--border-color);
-	border-radius: 5px;
+	border-radius: var(--ui-radius);
 	font-size: 16px;
 	transition: border-color 0.2s, box-shadow 0.2s;
-	background-color: #343a40;
-	color: var(--light-color);
+	background-color: var(--bg-surface);
+	color: var(--text-primary);
 }
 
 .form-group textarea {
@@ -103,7 +366,7 @@ h4 {
 .form-group textarea:focus {
 	outline: none;
 	border-color: var(--primary-color);
-	box-shadow: 0 0 0 3px rgba(77, 171, 247, 0.25);
+	box-shadow: 0 0 0 3px rgba(174, 62, 201, 0.25);
 }
 
 .form-group-checkbox {
@@ -125,29 +388,40 @@ h4 {
 }
 
 .password-wrapper {
-	position: relative;
+    position: relative;
+}
+
+.password-wrapper input[type='password'],
+.password-wrapper input[type='text'] {
+    padding-right: 44px; /* пространство под кнопку глаза */
 }
 
 .toggle-password {
-	position: absolute;
-	top: 42.5%;
-	right: 0px;
-	height: calc(57.5%);
-	width: 50px;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	border: none;
-	background: #495057;
-	cursor: pointer;
-	border-radius: 5px;
-	font-size: 20px;
-	padding: 0;
-	color: var(--light-color);
+    position: absolute;
+    bottom: 8px; /* перемещаем ниже, к углу */
+    right: 10px;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 8px;
+    padding: 0;
+    color: var(--text-primary);
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .toggle-password:hover {
-	background: #5c636a;
+    background: rgba(255,255,255,0.08);
+}
+
+.toggle-password svg {
+    width: 14px;
+    height: 14px;
+    display: block;
 }
 
 .button {
@@ -158,7 +432,7 @@ h4 {
 	text-align: center;
 	cursor: pointer;
 	border: none;
-	border-radius: 5px;
+	border-radius: 12px;
 	transition: background-color 0.2s, transform 0.1s;
 	color: #fff;
 	text-decoration: none;
@@ -224,7 +498,7 @@ h4 {
 	padding: 15px;
 	margin-bottom: 20px;
 	border: 1px solid transparent;
-	border-radius: 5px;
+	border-radius: 12px;
 }
 
 .flash-success {
@@ -238,6 +512,37 @@ h4 {
 	background-color: #7a2e34;
 	border-color: #943b42;
 }
+
+/* Glass alerts (общее обрамление как у карточек) */
+.alert {
+	border-radius: calc(var(--ui-radius) + 2px) !important;
+	background: color-mix(in oklab, var(--bg-card) 70%, transparent) !important;
+	color: var(--text-primary) !important;
+	border: 1px solid color-mix(in oklab, #ffffff 24%, var(--border-color) 76%) !important;
+	backdrop-filter: blur(10px) saturate(140%);
+	-webkit-backdrop-filter: blur(10px) saturate(140%);
+	box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+	padding: 10px 14px;
+	position: relative;
+}
+
+/* Акцентная полоса слева */
+.alert::before {
+	content: "";
+	position: absolute;
+	left: 6px;
+	top: 8px;
+	bottom: 8px;
+	width: 4px;
+	border-radius: 2px;
+	background: var(--primary-color);
+}
+.alert-success::before { background: var(--success-color); }
+.alert-warning::before { background: var(--warning-color); }
+.alert-danger::before { background: var(--danger-color); }
+
+/* Светлая тема — чуть больше контраста текста */
+html[data-bs-theme='light'] .alert { color: #1f2a37 !important; }
 
 .user-session-controls {
 	display: flex;
@@ -271,7 +576,7 @@ body.login-page {
 	max-width: 400px;
 	padding: 30px 40px;
 	background: #2d3238;
-	border-radius: 8px;
+	border-radius: 12px;
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 	position: relative;
 	z-index: 1; /* поверх фонового canvas */
@@ -294,41 +599,98 @@ body.login-page {
 
 .login-container h1 {
 	text-align: center;
-	margin-bottom: 25px;
-	color: var(--light-color);
 }
 
 .main-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	border-bottom: 1px solid var(--border-color);
-	padding-bottom: 15px;
-	margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid var(--border-color); /* рамка по периметру вместо только нижней границы */
+    border-radius: calc(var(--ui-radius) + 2px); /* корректное скругление сверху */
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    position: sticky;
+    top: 8px; /* небольшой отступ сверху, чтобы скругление не упиралось в край */
+    backdrop-filter: blur(12px) saturate(130%);
+    -webkit-backdrop-filter: blur(12px) saturate(130%);
+    background: color-mix(in oklab, var(--bg-surface) 80%, transparent);
+    box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+    z-index: 10;
 }
 
+.brand { flex: 0 0 auto; }
+.navigation { display:flex; align-items:center; gap: 10px; flex: 1 1 auto; }
 .navigation .nav-link {
-	font-size: 1.1em;
-	font-weight: 500;
-	color: var(--light-color);
-	text-decoration: none;
-	margin-right: 25px;
-	padding: 5px 0;
-	transition: color 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.98rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-decoration: none;
+    margin-right: 4px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+.navigation .nav-link:hover {
+    background: rgba(174,62,201,0.10);
+    color: var(--text-primary);
 }
 
-.navigation .nav-link:hover,
 .navigation .nav-link.active {
-	color: var(--primary-color);
-	border-bottom: 2px solid var(--primary-color);
+    color: #fff;
+    background: var(--primary-color);
+    border-color: color-mix(in oklab, var(--primary-color) 40%, var(--border-color));
+    box-shadow: 0 6px 14px rgba(174,62,201,0.25);
 }
 
-.header-controls {
-	display: flex;
-	justify-content: flex-end;
-	align-items: center;
-	gap: 20px;
+/* Кнопки справа — нормализованные стили */
+.header-controls .btn {
+    border-radius: var(--ui-radius);
 }
+.header-controls .btn-sm {
+    padding: 6px 12px;
+    font-size: .92rem;
+}
+.header-controls .btn-outline-secondary {
+    color: var(--text-primary);
+    background: transparent;
+    border: 1px solid var(--border-color);
+}
+.header-controls .btn-outline-secondary:hover {
+    background: rgba(255,255,255,0.06);
+}
+.header-controls .btn-outline-primary {
+    color: var(--primary-color);
+    background: transparent;
+    border: 1px solid var(--primary-color);
+}
+.header-controls .btn-outline-primary:hover {
+    background: color-mix(in oklab, var(--primary-color) 15%, transparent);
+    color: #fff;
+}
+.header-controls .btn-success {
+    background: var(--success-color);
+    border-color: var(--success-color);
+}
+.header-controls .btn-danger {
+    background: var(--danger-color);
+    border-color: var(--danger-color);
+}
+
+.header-controls .btn,
+.header-controls .btn-sm {
+    vertical-align: middle;
+    padding: 6px 12px;
+    line-height: 1.25;
+}
+
+.header-controls { flex: 0 0 auto; display:flex; align-items:center; gap:16px; margin:0; }
+.header-controls .bot-control { display:flex; align-items:center; gap:10px; }
+.header-controls .bot-control p { margin:0; line-height:1; }
+.user-session-controls { display:flex; align-items:center; gap:12px; }
 
 .main-footer {
 	margin-top: 40px;
@@ -344,17 +706,18 @@ body.login-page {
 }
 
 .stat-card {
-	background-color: #2d3238;
-	padding: 25px;
-	border-radius: 8px;
-	text-align: center;
+	background-color: var(--bg-card);
 	border: 1px solid var(--border-color);
+	border-radius: calc(var(--ui-radius) + 2px);
+	padding: 20px;
+	margin-bottom: 20px;
+	box-shadow: 0 8px 24px rgba(0,0,0,0.22);
 }
 
 .stat-card h3 {
 	margin-top: 0;
 	margin-bottom: 5px;
-	color: #adb5bd;
+	color: var(--text-muted);
 	font-size: 1em;
 	font-weight: 500;
 	text-transform: uppercase;
@@ -390,12 +753,29 @@ body.login-page {
 }
 
 .host-card {
-	background-color: #2d3238;
+	background-color: var(--bg-card);
 	border: 1px solid var(--border-color);
-	border-radius: 8px;
+	border-radius: calc(var(--ui-radius) + 2px);
 	padding: 20px;
 	margin-bottom: 20px;
+	box-shadow: 0 8px 24px rgba(0,0,0,0.22);
 }
+
+/* --- Hosts tab: unify look & layout --- */
+#hosts .host-card { padding: 18px; }
+#hosts .host-header { display:flex; align-items:center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+#hosts .host-header h3 { margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: .2px; }
+#hosts .host-card .form-inline { display:flex; align-items:center; gap: 8px; flex-wrap: nowrap; }
+#hosts .host-card .form-inline .form-control { flex: 1 1 auto; min-width: 0; }
+#hosts .host-card .form-inline .btn { flex: 0 0 auto; }
+#hosts .host-card .form-group { margin-bottom: 10px; }
+#hosts .host-card .form-control { width: 100%; }
+#hosts .plans-section h4 { margin-top: 10px; margin-bottom: 8px; color: var(--text-muted); }
+#hosts .plan-list { margin-top: 4px; }
+#hosts .plan-list .plan-row { gap: 8px; }
+#hosts .plan-list .plan-label { font-weight: 600; color: var(--text-primary); min-width: unset; }
+#hosts .plan-edit form { flex-wrap: nowrap; }
+#hosts .plan-edit form .form-control { min-width: 0; }
 
 .host-header {
 	display: flex;
@@ -408,7 +788,7 @@ body.login-page {
 
 .host-header h3 {
 	margin: 0;
-	color: var(--light-color);
+	color: var(--text-primary);
 }
 
 .plans-section h4,
@@ -540,14 +920,18 @@ body.login-page {
 }
 
 .chart-container {
-	background-color: #2d3238;
+	background-color: var(--bg-card);
 	border: 1px solid var(--border-color);
-	border-radius: 8px;
+	border-radius: calc(var(--ui-radius) + 2px);
 	margin-bottom: 30px;
-	max-width: 716px;
-	max-height: 423px;
-	padding: 20px 20px 50px;
+	max-width: 100%;
+	padding: 16px 16px 32px;
+	min-height: 300px; /* стабилизируем высоту контейнера графиков */
 }
+
+#newUsersChart, #newKeysChart { min-height: 220px; display: block; }
+
+.stats-grid .stat-card { min-height: 120px; }
 
 .transaction-list {
 	list-style: none;
@@ -555,9 +939,9 @@ body.login-page {
 }
 
 .transaction-item {
-	background-color: #2d3238;
+	background-color: var(--bg-card);
 	border: 1px solid var(--border-color);
-	border-radius: 8px;
+	border-radius: 14px;
 	padding: 15px;
 	margin-bottom: 15px;
 }
@@ -569,7 +953,7 @@ body.login-page {
 }
 
 .transaction-item p strong {
-	color: var(--light-color);
+	color: var(--text-primary);
 	display: inline-block;
 	width: 130px;
 }
@@ -591,11 +975,11 @@ body.login-page {
 	padding: 10px 12px;
 	text-align: left;
 	font-size: 0.9em;
-	color: var(--light-color);
+	color: var(--text-primary);
 }
 
 .transactions-table thead {
-	background-color: #343a40;
+	background-color: var(--bg-surface);
 }
 
 .transactions-table th {
@@ -613,10 +997,10 @@ body.login-page {
 .pagination a {
 	color: var(--primary-color);
 	background-color: #2d3238;
-	border: 1px solid var(--border-color);
+	border: 1px solid rgba(255,255,255,0.06);
 	padding: 8px 14px;
 	text-decoration: none;
-	border-radius: 5px;
+	border-radius: 12px;
 	transition: background-color 0.2s, color 0.2s;
 }
 
@@ -650,7 +1034,7 @@ body.login-page {
 	padding: 10px 12px;
 	text-align: left;
 	vertical-align: middle;
-	color: var(--light-color);
+	color: var(--text-primary);
 }
 
 .users-table thead {
@@ -688,127 +1072,443 @@ body.login-page {
 	background-color: var(--success-color);
 }
 
-@media (max-width: 1256px) {
-	.navigation {
-		display: flex;
-		justify-content: flex-start;
-		flex-wrap: wrap;
-	}
-	.header-controls {
-		flex-wrap: wrap;
-	}
-	.bot-control {
-		padding-right: 0;
-	}
-	li {
-		list-style-type: none;
-	}
-	.bm {
-		display: block;
-		input + label {
-			position: fixed;
-			top: 40px;
-			right: 40px;
-			z-index: 5;
-			span {
-				position: absolute;
-				width: 100%;
-				height: 2px;
-				top: 50%;
-				margin-top: -1px;
-				left: 0;
-				display: block;
-				transition: 0.5s;
-			}
-			span:first-child {
-				top: 3px;
-			}
-			span:last-child {
-				top: 16px;
-			}
-		}
-		label:hover {
-			cursor: pointer;
-		}
-		input:checked + label {
-			span {
-				opacity: 0;
-				top: 50%;
-			}
-			span:first-child {
-				opacity: 1;
-				transform: rotate(405deg);
-			}
-			span:last-child {
-				opacity: 1;
-				transform: rotate(-405deg);
-			}
-		}
-		input ~ nav {
-			background: rgba(45, 50, 56, 0.9);
-			position: fixed;
-			top: 0;
-			right: 0;
-			width: 330px;
-			height: 0px;
-			z-index: 3;
-			transition: 0.5s;
-			transition-delay: 0.5s;
-			overflow: hidden;
+/* Табы на settings (pills внутри карточки) */
+.card .nav { gap: 6px; }
+.card .nav { flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; }
+.card .nav .nav-item { flex: 0 0 auto; }
+.card .nav .nav-link { border-radius: 999px; padding: 7px 12px; color: var(--text-muted); border: 1px solid transparent; }
+.card .nav .nav-link:hover { background: rgba(174,62,201,0.08); color: var(--text-primary); }
+.card .nav .nav-link.active { background: var(--primary-color); color: #fff; box-shadow: 0 6px 16px rgba(174,62,201,0.25); border-color: color-mix(in oklab, var(--primary-color) 32%, var(--border-color)); }
+.card { border-color: var(--border-color) !important; border-radius: 14px; background: var(--bg-card); }
+.card.glass,
+.host-card,
+.chart-container,
+.chat-box,
+.login-container {
+	background: color-mix(in oklab, var(--bg-card) 70%, transparent);
+	border: 1px solid color-mix(in oklab, #ffffff 24%, var(--border-color) 76%);
+	backdrop-filter: blur(12px) saturate(140%);
+	-webkit-backdrop-filter: blur(12px) saturate(140%);
+	box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+.card .card-header { border-bottom-color: var(--border-color); }
 
-			> ul {
-				position: absolute;
-				top: 100px;
-				right: 10%;
-				> li {
-					opacity: 0;
-					transition: 0.5s;
-					transition-delay: 0s;
-					text-align: right;
-					> a {
-						font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-							'Helvetica Neue', Arial, sans-serif;
-						color: var(--light-color);
-						line-height: 1.6;
-						text-decoration: none;
-						font-size: 2em;
-					}
-				}
-			}
+/* Заголовок страницы */
+.page-header { margin: 8px 0 16px; }
+.page-header .page-title { margin: 0 0 4px; }
+.hr-text { height: 0; border-bottom: 1px solid var(--border-color); margin-top: 8px; opacity: .9; }
+
+/* Кнопки — мягкое скругление */
+.btn { border-radius: var(--ui-radius) !important; }
+.btn-sm { border-radius: 10px !important; }
+.btn-outline-secondary { border-color: var(--border-color); color: var(--text-primary); }
+.btn-outline-secondary:hover { background: rgba(255,255,255,0.06); }
+
+.badge-green {
+	background-color: var(--success-color);
+}
+
+.chat-box {
+	margin: 20px 0;
+	border: 1px solid var(--border-color);
+	border-radius: calc(var(--ui-radius) + 2px);
+	background: var(--bg-card);
+	max-height: 520px;
+	overflow-y: auto;
+	padding: 12px;
+}
+
+.chat-message {
+	margin: 10px 0;
+	max-width: 85%;
+	border-radius: calc(var(--ui-radius) + 2px);
+	padding: 10px 12px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-color);
+}
+
+/* Анимации */
+.fade-in { animation: fadeIn .35s ease-out both; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.lift:hover { transform: translateY(-2px); transition: transform .18s ease; }
+
+/* Применим анимацию появления к ключевым блокам */
+.card, .host-card, .chart-container, .login-container, .chat-box { animation: fadeIn .3s ease-out; }
+
+/* Бесшовное переключение секций настроек */
+.settings-section { transition: opacity .2s ease; }
+.settings-section.is-hidden { opacity: 0; height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; pointer-events: none; }
+
+/* --- Pill элементы и инлайн-редактирование --- */
+.form-control.pill { border-radius: var(--ui-radius); }
+.btn.pill { border-radius: var(--ui-radius); }
+
+/* Единый фон для readonly режима */
+[data-edit-row] [data-edit-target]:read-only {
+    background: color-mix(in oklab, var(--bg-card) 78%, transparent);
+    border-color: color-mix(in oklab, #ffffff 16%, var(--border-color) 84%);
+}
+
+/* При входе в режим редактирования — подсветка и акцентная рамка */
+[data-edit-row] [data-edit-target].is-editing {
+    background: color-mix(in oklab, var(--bg-surface) 88%, transparent);
+    border-color: color-mix(in oklab, var(--primary-color) 60%, var(--border-color));
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary-color) 18%, transparent);
+    transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+
+/* Вертикальное выравнивание кнопок действий */
+.edit-row { margin: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.edit-row .form-label, .edit-row .form-label { margin: 0; }
+.edit-row .edit-actions { display: inline-flex; gap: 6px; }
+
+/* Унитарный фон и скругление для инпутов в карточке хоста (включая нижние) */
+.host-card .form-control {
+    border-radius: var(--ui-radius);
+    background: color-mix(in oklab, var(--bg-card) 78%, transparent);
+    border: 1px solid color-mix(in oklab, #ffffff 16%, var(--border-color) 84%);
+}
+.host-card .form-control:focus {
+    background: color-mix(in oklab, var(--bg-surface) 88%, transparent);
+    border-color: color-mix(in oklab, var(--primary-color) 50%, var(--border-color));
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary-color) 16%, transparent);
+}
+
+/* Унификация полей во всех карточках настроек */
+.card .form-control,
+.card textarea,
+.card select {
+    border-radius: var(--ui-radius);
+    background: color-mix(in oklab, var(--bg-card) 78%, transparent);
+    border: 1px solid color-mix(in oklab, #ffffff 16%, var(--border-color) 84%);
+}
+.card .form-control:focus,
+.card textarea:focus,
+.card select:focus {
+    background: color-mix(in oklab, var(--bg-surface) 88%, transparent);
+    border-color: color-mix(in oklab, var(--primary-color) 50%, var(--border-color));
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary-color) 16%, transparent);
+}
+
+/* Красивые селекты (единообразие с инпутами) */
+.select-soft {
+    border-radius: var(--ui-radius) !important;
+    background: color-mix(in oklab, var(--bg-card) 78%, transparent) !important;
+    border: 1px solid color-mix(in oklab, #ffffff 16%, var(--border-color) 84%) !important;
+    color: var(--text-primary) !important;
+    padding-right: 2.25rem !important; /* место под стрелку */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%),
+      linear-gradient(to right, transparent, transparent);
+    background-position:
+      calc(100% - 1.1rem) calc(50% + .15rem),
+      calc(100% - .75rem) calc(50% + .15rem),
+      100% 0;
+    background-size: .45rem .45rem, .45rem .45rem, 2.5rem 100%;
+    background-repeat: no-repeat;
+}
+.select-soft:focus {
+    background: color-mix(in oklab, var(--bg-surface) 88%, transparent) !important;
+    border-color: color-mix(in oklab, var(--primary-color) 50%, var(--border-color)) !important;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary-color) 16%, transparent) !important;
+    outline: none;
+}
+.select-soft option {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+/* Кастомное скруглённое меню выбора поверх нативного select */
+.soft-select { position: relative; z-index: 30; }
+.soft-select select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
+.soft-select-toggle {
+    width: 100%;
+    text-align: left;
+    border-radius: var(--ui-radius);
+    background: color-mix(in oklab, var(--bg-card) 78%, transparent);
+    border: 1px solid color-mix(in oklab, #ffffff 16%, var(--border-color) 84%);
+    color: var(--text-primary);
+    padding: .5rem .875rem;
+}
+.soft-select-toggle:focus { outline: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary-color) 16%, transparent); border-color: color-mix(in oklab, var(--primary-color) 50%, var(--border-color)); }
+.soft-select-menu {
+    position: absolute;
+    z-index: 1055; /* поверх карточек и таблиц */
+    top: calc(100% + 6px);
+    left: 0; right: 0;
+    background: color-mix(in oklab, var(--bg-card) 60%, transparent);
+    border: 1px solid color-mix(in oklab, #ffffff 24%, var(--border-color) 76%);
+    border-radius: 14px;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.38);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    max-height: 320px;
+    overflow: auto;
+    padding: 6px;
+    display: none;
+}
+.soft-select.open { z-index: 1060; }
+.soft-select.open .soft-select-menu { display: block; }
+.soft-select-item {
+    border-radius: 10px;
+    padding: .4rem .6rem;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+.soft-select-item:hover { background: rgba(255,255,255,0.06); }
+.soft-select-item.is-active { background: color-mix(in oklab, var(--primary-color) 18%, transparent); color: #fff; }
+
+/* Стеклянные кнопки-чипы */
+.btn-glass {
+  background: color-mix(in oklab, var(--bg-card) 68%, transparent) !important;
+  border: 1px solid color-mix(in oklab, #ffffff 18%, var(--border-color) 82%) !important;
+  color: var(--text-primary) !important;
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+}
+.btn-glass:hover { background: color-mix(in oklab, var(--bg-surface) 78%, transparent) !important; }
+.btn-glass.btn-sm { border-radius: 12px !important; padding: 6px 10px; }
+
+/* Сместить индикатор статуса немного левее */
+.header-controls .bot-control .status-dot { margin-left: -4px; margin-right: 8px; }
+
+/* --- Универсальная анимация интерфейса (появление) --- */
+@keyframes glassIn {
+  0% { opacity: 0; transform: translateY(6px) scale(.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Применяем анимацию к ключевым всплывающим элементам */
+.soft-select-menu,
+.dropdown-menu,
+.flatpickr-calendar,
+.modal.show .modal-dialog,
+.toast.show {
+  animation: glassIn 140ms ease-out both;
+}
+
+/* --- Глобальный матово-стеклянный стиль для всплывающих компонентов --- */
+.dropdown-menu {
+  background: color-mix(in oklab, var(--bg-card) 70%, transparent) !important;
+  border: 1px solid color-mix(in oklab, #ffffff 22%, var(--border-color) 78%) !important;
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.30) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+.dropdown-item { color: var(--text-primary); }
+.dropdown-item:hover, .dropdown-item:focus { background: rgba(255,255,255,0.08); color: #fff; }
+.dropdown-divider { border-color: rgba(255,255,255,0.08); }
+
+.modal-content {
+  background: color-mix(in oklab, var(--bg-card) 70%, transparent) !important;
+  border: 1px solid color-mix(in oklab, #ffffff 22%, var(--border-color) 78%) !important;
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.40) !important;
+  border-radius: 14px !important;
+}
+
+.toast { 
+  background: color-mix(in oklab, var(--bg-card) 70%, transparent) !important;
+  border: 1px solid color-mix(in oklab, #ffffff 22%, var(--border-color) 78%) !important;
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.35) !important;
+  border-radius: 12px !important;
+  transition: opacity .28s ease, transform .22s ease !important;
+}
+
+/* Toast fade smoothing */
+.toast.fade { opacity: 0; }
+.toast.fade.show { opacity: 0.98; transform: translateY(0); }
+.toast.fade.showing { opacity: 0.01; transform: translateY(-4px); }
+.toast.hide { opacity: 0; transform: translateY(-4px); }
+
+/* Colored variants (override base glass background) */
+.toast.text-bg-success { background: color-mix(in oklab, var(--success-color) 22%, rgba(0,0,0,0.55)) !important; color: #fff !important; }
+.toast.text-bg-danger  { background: color-mix(in oklab, var(--danger-color) 22%, rgba(0,0,0,0.55)) !important; color: #fff !important; }
+.toast.text-bg-warning { background: color-mix(in oklab, var(--warning-color) 26%, rgba(0,0,0,0.40)) !important; color: #1f2a37 !important; }
+.toast.text-bg-secondary { background: color-mix(in oklab, var(--bg-card) 72%, rgba(0,0,0,0.45)) !important; color: var(--text-primary) !important; }
+.toast .btn-close { filter: invert(1) grayscale(100%); opacity: .8; }
+.toast.text-bg-warning .btn-close { filter: none; opacity: .6; }
+
+.offcanvas, .offcanvas-body {
+  background: color-mix(in oklab, var(--bg-card) 70%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+}
+
+.popover, .tooltip .tooltip-inner {
+  background: color-mix(in oklab, var(--bg-card) 78%, transparent) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid color-mix(in oklab, #ffffff 22%, var(--border-color) 78%) !important;
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+}
+.popover .popover-header { background: transparent !important; color: var(--text-primary) !important; border-bottom-color: rgba(255,255,255,0.12) !important; }
+.popover .popover-body { color: var(--text-primary) !important; }
+
+/* Подсветка мягкого обновления */
+.flash { animation: flashFade 600ms ease-out; }
+@keyframes flashFade { from { box-shadow: inset 0 0 0 2px rgba(174,62,201,0.4); } to { box-shadow: inset 0 0 0 0 rgba(0,0,0,0); } }
+
+/* --- Flatpickr: стеклянная тёмная тема --- */
+.flatpickr-calendar {
+  background: color-mix(in oklab, var(--bg-card) 70%, transparent) !important;
+  border: 1px solid color-mix(in oklab, #ffffff 22%, var(--border-color) 78%) !important;
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.35) !important;
+  border-radius: 12px !important;
+  color: var(--text-primary) !important;
+  overflow: hidden !important; /* аккуратные углы, ничего не просвечивает */
+}
+.flatpickr-months {
+  background: transparent !important; /* полупрозрачная шапка, сквозит стекло */
+  border-bottom: 1px solid rgba(255,255,255,0.10) !important;
+}
+.flatpickr-weekdays {
+  background: transparent !important; /* строка дней тоже прозрачная */
+  border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+}
+.flatpickr-months .flatpickr-month { color: var(--text-primary) !important; }
+.flatpickr-current-month .cur-month,
+.flatpickr-current-month .numInput.cur-year { color: var(--text-primary) !important; opacity: .95; }
+.flatpickr-prev-month, .flatpickr-next-month { color: var(--text-primary) !important; fill: currentColor !important; background: transparent !important; }
+.flatpickr-prev-month:hover, .flatpickr-next-month:hover { background: rgba(255,255,255,0.08) !important; }
+.flatpickr-day {
+  border-radius: 8px !important;
+}
+.flatpickr-day:hover {
+  background: rgba(255,255,255,0.08) !important;
+}
+.flatpickr-day.selected,
+.flatpickr-day.startRange,
+.flatpickr-day.endRange,
+.flatpickr-day.selected:hover {
+  background: var(--primary-color) !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary-color) 18%, transparent);
+}
+.flatpickr-time input,
+.flatpickr-time .numInputWrapper {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+}
+.flatpickr-time .arrowUp:after, .flatpickr-time .arrowDown:after { border-bottom-color: var(--text-primary) !important; }
+.flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-current-month .numInput.cur-year {
+  color: var(--text-primary) !important;
+}
+.flatpickr-calendar.arrowTop:before, .flatpickr-calendar.arrowTop:after,
+.flatpickr-calendar.arrowBottom:before, .flatpickr-calendar.arrowBottom:after { display:none !important; }
+
+/* Скругление и фон заголовка таблицы (страница Поддержка) */
+.table thead tr {
+    background: color-mix(in oklab, var(--bg-card) 85%, transparent);
+}
+.table thead th:first-child { border-top-left-radius: var(--ui-radius); }
+.table thead th:last-child { border-top-right-radius: var(--ui-radius); }
+
+/* Навигация вкладок — единый контейнер */
+.card .nav.nav-pills {
+    padding: 4px;
+}
+
+/* Стеклянный эффект по умолчанию для всех карточек */
+.card {
+    background: color-mix(in oklab, var(--bg-surface) 78%, transparent);
+    border: 1px solid color-mix(in oklab, #ffffff 10%, var(--border-color) 90%);
+    border-radius: var(--ui-radius-lg, 14px);
+    backdrop-filter: blur(8px);
+}
+
+/* Таблицы внутри карточек (например, «Недавние транзакции») */
+.card .table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+.card .table thead th {
+    border-bottom: 0; /* убираем разделительную полоску под заголовком */
+}
+/* Скругляем нижние углы у последней строки */
+.card .table tbody tr:last-child td:first-child { border-bottom-left-radius: var(--ui-radius); }
+.card .table tbody tr:last-child td:last-child { border-bottom-right-radius: var(--ui-radius); }
+/* Убираем едва заметную полоску снизу */
+.card .table tbody tr:last-child td { border-bottom: 0 !important; }
+
+.chat-message .meta {
+	display: flex;
+	justify-content: space-between;
+	font-size: 0.8em;
+	color: var(--text-muted);
+	margin-bottom: 6px;
+}
+
+.chat-message .content {
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.chat-message.from-user {
+	background: var(--bg-surface);
+	border-color: var(--border-color);
+}
+
+.chat-message.from-admin {
+	background: var(--bg-surface);
+	border-color: var(--border-color);
+	margin-left: auto;
+}
+
+.ticket-actions {
+	margin-top: 16px;
+}
+
+.ticket-actions textarea[name="message"] {
+	width: 100%;
+	background: #343a40;
+	color: var(--light-color);
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	padding: 10px;
+}
+
+.ticket-actions .buttons {
+	display: flex;
+	gap: 10px;
+	margin-top: 10px;
+}
+
+@media (max-width: 992px) {
+    	.navigation {
+			display: none;
 		}
-		input:checked ~ nav {
-			height: 100%;
-			transition-delay: 0s;
-			> ul {
-				> li {
-					opacity: 1;
-					transition-delay: 0.5s;
-					margin-bottom: 30px;
-				}
-			}
-		}
-	}
-	.navigation {
-		display: none;
-	}
-	.burger_img {
-		background: url('../img/burger.png');
-		background-size: max(32px, 32px);
-		height: 32px;
-		width: 32px;
-	}
-	.main-header {
-		justify-content: flex-start;
-	}
+    .bm { display:block; }
+    .burger_img {
+        display:block;
+        background: url('../img/burger.png');
+        background-size: 28px 28px;
+        height: 28px; width: 28px;
+        z-index: 1100;
+        cursor: pointer;
+    }
+    /* оставим место под бургер справа, чтобы кнопка темы не наезжала */
+    .header-controls { padding-right: 44px; }
+    .main-header { justify-content: flex-start; }
 	.container {
 		max-width: 93%;
 		padding: 20px;
 	}
 	.bm {
-		input + label {
-			top: 20px;
-			right: 10px;
-		}
+		input + label { top: 10px; right: 12px; }
 	}
 }
 
@@ -1049,8 +1749,8 @@ body.login-page {
 .chat-box {
 	margin: 20px 0;
 	border: 1px solid var(--border-color);
-	border-radius: 8px;
-	background: #2b3137;
+	border-radius: 14px;
+	background: var(--bg-card);
 	max-height: 520px;
 	overflow-y: auto;
 	padding: 12px;
@@ -1059,17 +1759,17 @@ body.login-page {
 .chat-message {
 	margin: 10px 0;
 	max-width: 85%;
-	border-radius: 10px;
+	border-radius: 14px;
 	padding: 10px 12px;
-	background: #343a40;
-	border: 1px solid #3f464d;
+	background: var(--bg-surface);
+	border: 1px solid var(--border-color);
 }
 
 .chat-message .meta {
 	display: flex;
 	justify-content: space-between;
 	font-size: 0.8em;
-	color: #adb5bd;
+	color: var(--text-muted);
 	margin-bottom: 6px;
 }
 
@@ -1079,13 +1779,13 @@ body.login-page {
 }
 
 .chat-message.from-user {
-	background: #2f3640;
-	border-color: #3d444c;
+	background: var(--bg-surface);
+	border-color: var(--border-color);
 }
 
 .chat-message.from-admin {
-	background: #25364a;
-	border-color: #2f4a66;
+	background: var(--bg-surface);
+	border-color: var(--border-color);
 	margin-left: auto;
 }
 

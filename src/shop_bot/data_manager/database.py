@@ -359,6 +359,64 @@ def update_host_subscription_url(host_name: str, subscription_url: str | None) -
         logging.error(f"Failed to update subscription_url for host '{host_name}': {e}")
         return False
 
+def update_host_url(host_name: str, new_url: str) -> bool:
+    """Обновить URL панели XUI для указанного хоста."""
+    try:
+        host_name = normalize_host_name(host_name)
+        new_url = (new_url or "").strip()
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
+            if cursor.fetchone() is None:
+                logging.warning(f"update_host_url: host not found by name='{host_name}'")
+                return False
+            cursor.execute(
+                "UPDATE xui_hosts SET host_url = ? WHERE TRIM(host_name) = TRIM(?)",
+                (new_url, host_name)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update host_url for host '{host_name}': {e}")
+        return False
+
+def update_host_name(old_name: str, new_name: str) -> bool:
+    """Переименовать хост во всех связанных таблицах (xui_hosts, plans, vpn_keys)."""
+    try:
+        old_name_n = normalize_host_name(old_name)
+        new_name_n = normalize_host_name(new_name)
+        if not new_name_n:
+            logging.warning("update_host_name: new host name is empty after normalization")
+            return False
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (old_name_n,))
+            if cursor.fetchone() is None:
+                logging.warning(f"update_host_name: source host not found '{old_name_n}'")
+                return False
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (new_name_n,))
+            exists_target = cursor.fetchone() is not None
+            if exists_target and old_name_n.lower() != new_name_n.lower():
+                logging.warning(f"update_host_name: target name '{new_name_n}' is already used")
+                return False
+            cursor.execute(
+                "UPDATE xui_hosts SET host_name = TRIM(?) WHERE TRIM(host_name) = TRIM(?)",
+                (new_name_n, old_name_n)
+            )
+            cursor.execute(
+                "UPDATE plans SET host_name = TRIM(?) WHERE TRIM(host_name) = TRIM(?)",
+                (new_name_n, old_name_n)
+            )
+            cursor.execute(
+                "UPDATE vpn_keys SET host_name = TRIM(?) WHERE TRIM(host_name) = TRIM(?)",
+                (new_name_n, old_name_n)
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to rename host from '{old_name}' to '{new_name}': {e}")
+        return False
+
 def delete_host(host_name: str):
     try:
         host_name = normalize_host_name(host_name)
@@ -383,6 +441,29 @@ def get_host(host_name: str) -> dict | None:
     except sqlite3.Error as e:
         logging.error(f"Error getting host '{host_name}': {e}")
         return None
+
+def delete_key_by_id(key_id: int) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM vpn_keys WHERE key_id = ?", (key_id,))
+            affected = cursor.rowcount
+            conn.commit()
+            return affected > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to delete key by id {key_id}: {e}")
+        return False
+
+def update_key_comment(key_id: int, comment: str) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE vpn_keys SET comment = ? WHERE key_id = ?", (comment, key_id))
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update key comment for {key_id}: {e}")
+        return False
 
 def get_all_hosts() -> list[dict]:
     try:
@@ -731,14 +812,24 @@ def register_user_if_not_exists(telegram_id: int, username: str, referrer_id):
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT telegram_id FROM users WHERE telegram_id = ?", (telegram_id,))
-            if not cursor.fetchone():
+            cursor.execute("SELECT referred_by FROM users WHERE telegram_id = ?", (telegram_id,))
+            row = cursor.fetchone()
+            if not row:
+                # Новый пользователь — сразу сохраняем возможного реферера
                 cursor.execute(
                     "INSERT INTO users (telegram_id, username, registration_date, referred_by) VALUES (?, ?, ?, ?)",
                     (telegram_id, username, datetime.now(), referrer_id)
                 )
             else:
+                # Пользователь уже есть — обновим username, и если есть реферер и поле пустое, допишем
                 cursor.execute("UPDATE users SET username = ? WHERE telegram_id = ?", (username, telegram_id))
+                current_ref = row[0]
+                if referrer_id and (current_ref is None or str(current_ref).strip() == "") and int(referrer_id) != int(telegram_id):
+                    try:
+                        cursor.execute("UPDATE users SET referred_by = ? WHERE telegram_id = ?", (int(referrer_id), telegram_id))
+                    except Exception:
+                        # best-effort
+                        pass
             conn.commit()
     except sqlite3.Error as e:
         logging.error(f"Failed to register user {telegram_id}: {e}")
@@ -814,6 +905,18 @@ def get_balance(user_id: int) -> float:
     except sqlite3.Error as e:
         logging.error(f"Failed to get balance for user {user_id}: {e}")
         return 0.0
+
+def adjust_user_balance(user_id: int, delta: float) -> bool:
+    """Скорректировать баланс пользователя на указанную дельту (может быть отрицательной)."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET balance = COALESCE(balance, 0) + ? WHERE telegram_id = ?", (float(delta), user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to adjust balance for user {user_id}: {e}")
+        return False
 
 def set_balance(user_id: int, value: float) -> bool:
     try:
