@@ -1,3 +1,11 @@
+<p align="center">
+  <img alt="release" src="https://img.shields.io/github/v/release/tweopi/3xui-shopbot?label=RELEASE&style=flat-square">
+  <img alt="build" src="https://img.shields.io/github/actions/workflow/status/tweopi/3xui-shopbot/ci.yml?branch=main&label=BUILD&style=flat-square">
+  <img alt="go" src="https://img.shields.io/github/go-mod/go-version/tweopi/3xui-shopbot?label=GO&style=flat-square">
+  <img alt="downloads" src="https://img.shields.io/github/downloads/tweopi/3xui-shopbot/total?label=DOWNLOADS&style=flat-square">
+  <img alt="license" src="https://img.shields.io/github/license/tweopi/3xui-shopbot?label=LICENSE&style=flat-square">
+</p>
+
 <div align="center" markdown>
       <h1>VLESS Shop Bot | Telegram-бот для продажи VPN</h1>
 <p align="center">
