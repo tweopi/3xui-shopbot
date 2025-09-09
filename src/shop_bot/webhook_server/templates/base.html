@@ -130,21 +130,35 @@
 					<script>
 						(function(){
 							const cont = document.getElementById('toast-container');
-							if (!cont) return;
 							const dataTag = document.getElementById('flash-messages');
-							if (!dataTag) return;
+							if (!cont || !dataTag) return;
 							let items = [];
 							try { items = JSON.parse(dataTag.textContent || '[]'); } catch(_){ items = []; }
-							items.forEach(function(item){
-								const category = item[0] || 'secondary';
-								const message = item[1] || '';
-								const el = document.createElement('div');
-                                el.className = 'toast fade align-items-center text-bg-' + (category === 'danger' ? 'danger' : (category === 'success' ? 'success' : (category === 'warning' ? 'warning' : 'secondary')));
-								el.setAttribute('role','alert'); el.setAttribute('aria-live','assertive'); el.setAttribute('aria-atomic','true');
-								el.innerHTML = '<div class="d-flex"><div class="toast-body">'+ message +'</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>';
-								cont.appendChild(el);
-								try { new bootstrap.Toast(el, { delay: 4000, autohide: true }).show(); } catch(_){ }
-							});
+
+							function renderToasts(){
+								items.forEach(function(item){
+									const category = item[0] || 'secondary';
+									const message = item[1] || '';
+									const el = document.createElement('div');
+									el.className = 'toast fade align-items-center text-bg-' + (category === 'danger' ? 'danger' : (category === 'success' ? 'success' : (category === 'warning' ? 'warning' : 'secondary')));
+									el.setAttribute('role','alert'); el.setAttribute('aria-live','assertive'); el.setAttribute('aria-atomic','true');
+									el.innerHTML = '<div class="d-flex"><div class="toast-body">'+ message +'</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>';
+									cont.appendChild(el);
+								});
+								// Если bootstrap уже загружен — показываем сразу, иначе дождёмся события load
+								function showNow(){
+									try {
+										cont.querySelectorAll('.toast').forEach(el => new bootstrap.Toast(el, { delay: 4000, autohide: true }).show());
+									} catch(_) {}
+								}
+								if (window.bootstrap && window.bootstrap.Toast) {
+									showNow();
+								} else {
+									window.addEventListener('load', showNow, { once: true });
+								}
+							}
+
+							renderToasts();
 						})();
 					</script>
 				{% endif %}

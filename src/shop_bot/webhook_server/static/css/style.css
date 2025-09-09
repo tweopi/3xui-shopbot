@@ -288,13 +288,13 @@ body::after {
 }
 
 /* Брендинг в шапке */
-.main-header { position: relative; display:flex; align-items:center; justify-content: space-between; gap: 16px; }
+.main-header { position: relative; display:flex; align-items:center; justify-content: space-between; gap: 16px; overflow: visible; }
 .brand { display:flex; align-items:center; gap:12px; }
 .brand .brand-link { display:flex; align-items:center; gap:10px; text-decoration:none; }
 .brand #brand-title { display:flex; align-items:center; line-height:1; margin:0; padding:0; }
 .brand img { height: 56px; width: auto; border-radius: var(--ui-radius); display:block; object-fit: contain; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.25)); }
 .brand span { font-weight: 800; font-size: 1.06rem; letter-spacing: .25px; line-height: 1; }
-.navigation { display:flex; align-items:center; gap: 14px; flex: 1 1 auto; justify-content: center; }
+.navigation { display:flex; align-items:center; gap: 10px; flex: 1 1 auto; justify-content: center; }
 .navigation .nav-link { padding: 6px 12px; border-radius: 999px; }
 .header-controls { display:flex; align-items:center; gap: 10px; }
 #brand-edit { padding: 2px 8px !important; border-radius: 999px !important; }
@@ -628,29 +628,35 @@ body.login-page {
     font-weight: 600;
     color: var(--text-muted);
     text-decoration: none;
-    margin-right: 4px;
-    padding: 6px 12px; /* компактнее, чтобы не раздувалось */
-    padding-right: 32px; /* резерв под бейдж, чтобы текст не скакал */
-    height: 36px; /* фиксированная высота плашки */
+    margin-right: 0; /* убираем лишний внешний зазор, используем только gap */
+    padding: 8px 14px; /* единый размер пилюль */
+    height: 38px; /* фиксированная высота плашки */
     line-height: 1; /* исключаем вертикальное расползание */
     border-radius: 999px;
-    border: 1px solid transparent;
-    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+    background: color-mix(in oklab, var(--primary-color) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--primary-color) 26%, var(--border-color));
     position: relative; /* для абсолютного бейджа */
 }
+.navigation .nav-link:has(.open-tickets-badge) { padding-right: 32px; }
 .navigation .nav-link:focus { outline: none; box-shadow: none; }
 .navigation .nav-link:active { outline: none; box-shadow: none; }
 .navigation .nav-link:hover {
-    background: rgba(174,62,201,0.10);
-    color: var(--text-primary);
+    background: color-mix(in oklab, var(--primary-color) 26%, transparent);
+    color: #fff;
+    /* более аккуратная круговая тень */
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--primary-color) 38%, transparent),
+      0 10px 22px rgba(174,62,201,0.26);
 }
 
 .navigation .nav-link.active {
     color: #fff;
-    /* заливка без обводки и без сильной тени */
-    background: color-mix(in oklab, var(--primary-color) 18%, transparent);
-    border-color: transparent;
-    box-shadow: none;
+    background: color-mix(in oklab, var(--primary-color) 42%, transparent);
+    border-color: color-mix(in oklab, var(--primary-color) 40%, var(--border-color));
+    /* круглая мягкая тень с легким контуром */
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--primary-color) 42%, transparent),
+      0 12px 28px rgba(174,62,201,0.34);
 }
 
 .navigation .nav-link .open-tickets-badge {
@@ -1124,11 +1130,43 @@ body.login-page {
 
 /* Табы на settings (pills внутри карточки) */
 .card .nav { gap: 6px; }
-.card .nav { flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; }
+.card .nav { flex-wrap: nowrap; overflow-x: auto; overflow-y: visible; white-space: nowrap; padding: 8px 8px; }
+.settings-column-right .card { overflow: visible; }
 .card .nav .nav-item { flex: 0 0 auto; }
-.card .nav .nav-link { border-radius: 999px; padding: 7px 12px; color: var(--text-muted); border: 1px solid transparent; }
-.card .nav .nav-link:hover { background: rgba(174,62,201,0.08); color: var(--text-primary); }
-.card .nav .nav-link.active { background: var(--primary-color); color: #fff; box-shadow: 0 6px 16px rgba(174,62,201,0.25); border-color: color-mix(in oklab, var(--primary-color) 32%, var(--border-color)); }
+.card .nav .nav-link {
+  border-radius: 999px;
+  padding: 8px 14px;
+  color: var(--text-muted);
+  /* аккуратная светлая окантовка по кругу */
+  border: 1px solid color-mix(in oklab, #ffffff 18%, var(--border-color) 82%);
+  background: color-mix(in oklab, var(--bg-card) 88%, transparent);
+}
+.card .nav .nav-link:hover {
+  background: color-mix(in oklab, var(--primary-color) 22%, transparent);
+  color: #fff;
+  /* мягкая тень без "обрыва" по краям */
+  box-shadow: 0 6px 16px rgba(174,62,201,0.22);
+  border-color: color-mix(in oklab, var(--primary-color) 40%, var(--border-color));
+}
+.card .nav .nav-link.active {
+  background: color-mix(in oklab, var(--primary-color) 50%, transparent);
+  color: #fff;
+  border-color: color-mix(in oklab, var(--primary-color) 56%, var(--border-color));
+  /* чуть короче по радиусу и менее заметна у краёв контейнера */
+  box-shadow: 0 8px 22px rgba(174,62,201,0.28);
+}
+
+/* Кнопка "Выйти" — красная */
+.user-session-controls form[action$="/logout"] .btn {
+  background: var(--danger-color);
+  border-color: var(--danger-color);
+  color: #fff;
+}
+.user-session-controls form[action$="/logout"] .btn:hover,
+.user-session-controls form[action$="/logout"] .btn:focus {
+  filter: brightness(1.08);
+  color: #fff;
+}
 .card { border-color: var(--border-color) !important; border-radius: 14px; background: var(--bg-card); }
 .card.glass,
 .host-card,
@@ -1189,6 +1227,10 @@ body.login-page {
 /* Бесшовное переключение секций настроек */
 .settings-section { transition: opacity .2s ease; }
 .settings-section.is-hidden { opacity: 0; height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; pointer-events: none; }
+
+/* Toasts: принудительный оверлей поверх шапки */
+#toast-container { z-index: 2000 !important; pointer-events: none; }
+#toast-container .toast { pointer-events: auto; margin-bottom: 10px; }
 
 /* --- Pill элементы и инлайн-редактирование --- */
 .form-control.pill { border-radius: var(--ui-radius); }
@@ -1371,7 +1413,7 @@ body.login-page {
   backdrop-filter: blur(10px) saturate(140%);
   -webkit-backdrop-filter: blur(10px) saturate(140%);
   box-shadow: 0 16px 40px rgba(0,0,0,0.35) !important;
-  border-radius: 12px !important;
+  border-radius: 14px !important;
   transition: opacity .28s ease, transform .22s ease !important;
 }
 
@@ -1382,7 +1424,12 @@ body.login-page {
 .toast.hide { opacity: 0; transform: translateY(-4px); }
 
 /* Colored variants (override base glass background) */
-.toast.text-bg-success { background: color-mix(in oklab, var(--success-color) 22%, rgba(0,0,0,0.55)) !important; color: #fff !important; }
+.toast.text-bg-success  {
+  background: color-mix(in oklab, var(--success-color) 22%, rgba(0,0,0,0.55)) !important;
+  color: #fff !important;
+  border-color: color-mix(in oklab, var(--success-color) 60%, #000000 40%) !important;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.45), 0 0 0 1px color-mix(in oklab, #ffffff 28%, var(--success-color) 72%) inset !important;
+}
 .toast.text-bg-danger  { background: color-mix(in oklab, var(--danger-color) 22%, rgba(0,0,0,0.55)) !important; color: #fff !important; }
 .toast.text-bg-warning { background: color-mix(in oklab, var(--warning-color) 26%, rgba(0,0,0,0.40)) !important; color: #1f2a37 !important; }
 .toast.text-bg-secondary { background: color-mix(in oklab, var(--bg-card) 72%, rgba(0,0,0,0.45)) !important; color: var(--text-primary) !important; }

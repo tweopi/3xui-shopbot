@@ -898,9 +898,9 @@ def create_webhook_app(bot_controller_instance):
                     continue
                 update_setting(key, request.form.get(key, ''))
 
-            flash('Настройки успешно сохранены!', 'success')
+            # Единый тост об успехе сохранения настроек
+            flash('Настройки сохранены.', 'success')
             next_hash = (request.form.get('next_hash') or '').strip() or '#panel'
-            # Используем query, так как фрагмент (#) не участвует в HTTP-запросе
             next_tab = (next_hash[1:] if next_hash.startswith('#') else next_hash) or 'panel'
             return redirect(url_for('settings_page', tab=next_tab))
 

@@ -494,12 +494,32 @@
 				</div>
 			</section>
 
+			<input type="hidden" id="settings-next-hash" name="next_hash" />
 			<button type="submit" class="btn btn-primary">
 				Сохранить все настройки
 			</button>
-		</form>
-	</div>
+		        </form>
+    </div>
 </div>
+
+<script>
+  // Перед сохранением запоминаем текущую вкладку
+  (function(){
+    const form = document.querySelector('.settings-column-right form[action*="/settings"]');
+    if (!form) return;
+    const hidden = form.querySelector('#settings-next-hash');
+    form.addEventListener('submit', function(){
+      let hash = location.hash || '';
+      // если hash пуст, пробуем взять активную ссылку pills
+      if (!hash){
+        const active = document.querySelector('.nav.nav-pills .nav-link.active');
+        if (active && active.getAttribute('href')) hash = active.getAttribute('href');
+      }
+      if (!hash) hash = '#panel';
+      if (hidden) hidden.value = hash;
+    });
+  })();
+</script>
 
 <script>
   document.addEventListener('click', function (e) {
