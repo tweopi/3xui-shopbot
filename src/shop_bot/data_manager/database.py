@@ -33,7 +33,8 @@ def initialize_db():
                     balance REAL DEFAULT 0,
                     referred_by INTEGER,
                     referral_balance REAL DEFAULT 0,
-                    referral_balance_all REAL DEFAULT 0
+                    referral_balance_all REAL DEFAULT 0,
+                    referral_start_bonus_received BOOLEAN DEFAULT 0
                 )
             ''')
             cursor.execute('''
@@ -140,6 +141,11 @@ def initialize_db():
                 "ton_wallet_address": None,
                 "tonapi_key": None,
                 "support_forum_chat_id": None,
+                # Referral program advanced
+                "enable_fixed_referral_bonus": "false",
+                "fixed_referral_bonus_amount": "50",
+                "referral_reward_type": "percent_purchase",  # percent_purchase | fixed_purchase | fixed_start_referrer
+                "referral_on_start_referrer_amount": "20",
             }
             run_migration()
             for key, value in default_settings.items():
@@ -188,6 +194,12 @@ def run_migration():
             logging.info(" -> The column 'referral_balance_all' is successfully added.")
         else:
             logging.info(" -> The column 'referral_balance_all' already exists.")
+
+        if 'referral_start_bonus_received' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN referral_start_bonus_received BOOLEAN DEFAULT 0")
+            logging.info(" -> The column 'referral_start_bonus_received' is successfully added.")
+        else:
+            logging.info(" -> The column 'referral_start_bonus_received' already exists.")
         
         logging.info("The table 'users' has been successfully updated.")
 
@@ -357,6 +369,21 @@ def update_host_subscription_url(host_name: str, subscription_url: str | None) -
             return True
     except sqlite3.Error as e:
         logging.error(f"Failed to update subscription_url for host '{host_name}': {e}")
+        return False
+
+def set_referral_start_bonus_received(user_id: int) -> bool:
+    """Пометить, что пользователь получил стартовый бонус за реферальную регистрацию."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET referral_start_bonus_received = 1 WHERE telegram_id = ?",
+                (user_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to set referral_start_bonus_received for user {user_id}: {e}")
         return False
 
 def update_host_url(host_name: str, new_url: str) -> bool:

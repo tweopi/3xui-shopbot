@@ -3,6 +3,48 @@
   transition: min-height .24s ease;
 }
 
+/* --- UI utility: pill rounding --- */
+.pill { border-radius: 9999px !important; }
+.pill-md { border-radius: 14px !important; }
+.input-group .form-select.pill,
+.input-group .form-control.pill { border-top-right-radius: 9999px !important; border-bottom-right-radius: 9999px !important; }
+.input-group .form-select.pill-md,
+.input-group .form-control.pill-md { border-top-right-radius: 14px !important; border-bottom-right-radius: 14px !important; }
+.input-group .input-group-text:first-child { border-top-left-radius: 14px !important; border-bottom-left-radius: 14px !important; }
+
+/* Keep icons stable inside input-group when switching visibility */
+.input-group .input-group-text { background: var(--bg-surface); border-color: var(--border-color); color: var(--text-muted); display:flex; align-items:center; justify-content:center; min-width: 40px; }
+/* Remove inner seams between addons and controls */
+.input-group.with-prefix .input-group-text:first-child { border-right: 0 !important; }
+.input-group.with-suffix .input-group-text:last-child { border-left: 0 !important; }
+.input-group .form-control, .input-group .form-select { background: var(--bg-surface); border-color: var(--border-color); }
+.input-group .form-select.pill:focus,
+.input-group .form-control.pill:focus,
+.input-group .form-select.pill-md:focus,
+.input-group .form-control.pill-md:focus { box-shadow: 0 0 0 .12rem rgba(174,62,201,.25); border-color: var(--primary-color); }
+
+/* Precise radii for groups with prefix/suffix icons */
+.input-group.with-prefix .form-control,
+.input-group.with-prefix .form-select { border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; }
+.input-group.with-suffix .form-control,
+.input-group.with-suffix .form-select { border-top-right-radius: 0 !important; border-bottom-right-radius: 0 !important; }
+.input-group.with-prefix.with-suffix .form-control,
+.input-group.with-prefix.with-suffix .form-select { border-radius: 0 !important; }
+.input-group.with-suffix .input-group-text:last-child { border-top-right-radius: 14px !important; border-bottom-right-radius: 14px !important; }
+.input-group.with-prefix .input-group-text:first-child { border-top-left-radius: 14px !important; border-bottom-left-radius: 14px !important; }
+
+/* Soft-select inside input-group: remove double border and keep icon visible */
+.input-group.with-prefix .soft-select .soft-select-toggle { border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; border-left: 0 !important; }
+.input-group.with-suffix .soft-select .soft-select-toggle { border-top-right-radius: 0 !important; border-bottom-right-radius: 0 !important; border-right: 0 !important; }
+.input-group .input-group-text { position: relative; z-index: 2; }
+.input-group .soft-select .soft-select-toggle { position: relative; z-index: 1; }
+
+/* Make soft-select toggle border color match controls for seamless look */
+.soft-select-toggle { border-color: var(--border-color) !important; background: color-mix(in oklab, var(--bg-surface) 90%, transparent) !important; }
+
+/* Normalize select look across browsers so icons don't shift */
+.form-select.pill, .form-select.pill-md { -moz-appearance: none; -webkit-appearance: none; appearance: none; padding-right: 2.25rem; }
+
 /* ===== Modals polish (dark theme) ===== */
 .modal.modal-blur .modal-dialog {
   /* немного увеличим радиус и сгладим края */

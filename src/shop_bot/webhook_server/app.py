@@ -48,6 +48,8 @@ ALL_SETTINGS_KEYS = [
     "referral_discount", "ton_wallet_address", "tonapi_key", "force_subscription", "trial_enabled", "trial_duration_days", "enable_referrals", "minimum_withdrawal",
     # Реферальные начисления: альтернативный фиксированный бонус
     "enable_fixed_referral_bonus", "fixed_referral_bonus_amount",
+    # Тип начисления реферальной системы (без стартового бонуса)
+    "referral_reward_type", "referral_on_start_referrer_amount",
     "support_forum_chat_id",
     "support_bot_token", "support_bot_username",
     # UI

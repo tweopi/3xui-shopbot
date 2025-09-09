@@ -326,7 +326,7 @@
                     </div>
                 </div>
             </section>
-            <section class="settings-section" id="referrals">
+            			<section class="settings-section" id="referrals">
 				<div class="card">
 					<div class="card-header"><h2 class="card-title">Настройки Реферальной программы</h2></div>
 					<div class="card-body">
@@ -338,29 +338,61 @@
 							</div>
 						</div>
 						<div class="mb-3">
+							<label class="form-label" for="referral_reward_type">Тип начисления</label>
+							<div class="input-group with-prefix">
+                                <span class="input-group-text"><i class="ti ti-gift"></i></span>
+                                <div class="soft-select flex-grow-1" data-target="referral_reward_type">
+                                    <button type="button" class="soft-select-toggle" id="referral_reward_type_toggle">—</button>
+                                    <div class="soft-select-menu" id="referral_reward_type_menu"></div>
+                                    <select class="form-select rounded-3 select-soft" id="referral_reward_type" name="referral_reward_type">
+                                        <option value="percent_purchase" {% if (settings.referral_reward_type or 'percent_purchase') == 'percent_purchase' %}selected{% endif %}>Процент с покупки реферала</option>
+                                        <option value="fixed_purchase" {% if settings.referral_reward_type == 'fixed_purchase' %}selected{% endif %}>Фиксированная сумма за покупку реферала</option>
+                                        <option value="fixed_start_referrer" {% if settings.referral_reward_type == 'fixed_start_referrer' %}selected{% endif %}>Фиксированный бонус пригласившему при старте по реферальной ссылке</option>
+                                    </select>
+                                </div>
+                            </div>
+							<div class="form-text text-secondary">Показываются только параметры, актуальные для выбранного типа.</div>
+						</div>
+						<div class="mb-3">
 							<label class="form-label" for="minimum_withdrawal">Минимальная сумма для вывода</label>
-							<input class="form-control" type="number" id="minimum_withdrawal" name="minimum_withdrawal" value="{{ settings.minimum_withdrawal or '10' }}" />
+							<input class="form-control pill-md" type="number" id="minimum_withdrawal" name="minimum_withdrawal" value="{{ settings.minimum_withdrawal or '10' }}" />
 						</div>
-						<div class="mb-3">
-							<label class="form-label" for="referral_percentage">Процент вознаграждения пригласившему (%)</label>
-							<input class="form-control" type="number" id="referral_percentage" name="referral_percentage" value="{{ settings.referral_percentage or '10' }}" />
+
+						<!-- Percent mode -->
+						<div class="mb-3" data-ref-section="percent_purchase">
+							<label class="form-label" for="referral_percentage">Процент вознаграждения пригласившему</label>
+							<div class="input-group with-suffix">
+                                <input class="form-control pill-md" type="number" id="referral_percentage" name="referral_percentage" value="{{ settings.referral_percentage or '10' }}" />
+                                <span class="input-group-text">%</span>
+                            </div>
+							<div class="form-text text-secondary">Начисляется рефереру от суммы каждой покупки приглашённого.</div>
 						</div>
-						<hr />
-						<div class="mb-2">
-							<input type="hidden" name="enable_fixed_referral_bonus" value="false" />
-							<div class="form-check">
-								<input class="form-check-input" type="checkbox" id="enable_fixed_referral_bonus" name="enable_fixed_referral_bonus" value="true" {% if settings.enable_fixed_referral_bonus == 'true' %}checked{% endif %}>
-								<label class="form-check-label" for="enable_fixed_referral_bonus">Использовать фиксированный бонус вместо процента</label>
-							</div>
-						</div>
-						<div class="mb-3">
-							<label class="form-label" for="fixed_referral_bonus_amount">Сумма фиксированного бонуса (RUB)</label>
-							<input class="form-control" type="number" step="0.01" id="fixed_referral_bonus_amount" name="fixed_referral_bonus_amount" value="{{ settings.fixed_referral_bonus_amount or '50' }}" />
-							<small class="text-secondary">По умолчанию — 50 руб. Если включена опция выше, будет начисляться именно эта сумма.</small>
-						</div>
+						<!-- Fixed per purchase mode -->
+						<div class="mb-3" data-ref-section="fixed_purchase">
+							<label class="form-label" for="fixed_referral_bonus_amount">Фиксированная сумма за покупку</label>
+							<div class="input-group with-suffix">
+                                <input class="form-control pill-md" type="number" step="0.01" id="fixed_referral_bonus_amount" name="fixed_referral_bonus_amount" value="{{ settings.fixed_referral_bonus_amount or '50' }}" />
+                                <span class="input-group-text">₽</span>
+                            </div>
+                            <div class="form-text text-secondary">Каждая покупка приглашённого начисляет рефереру фиксированную сумму.</div>
+                        </div>
+
+                        <!-- Fixed start bonus to referrer on start mode -->
+                        <div class="mb-3" data-ref-section="fixed_start_referrer">
+                            <label class="form-label" for="referral_on_start_referrer_amount">Бонус пригласившему при старте (RUB)</label>
+                            <div class="input-group with-suffix">
+                                <input class="form-control pill-md" type="number" step="0.01" id="referral_on_start_referrer_amount" name="referral_on_start_referrer_amount" value="{{ settings.referral_on_start_referrer_amount or '20' }}" />
+                                <span class="input-group-text">₽</span>
+                            </div>
+                            <div class="form-text text-secondary">Единоразово начисляется пригласившему, когда новый пользователь запускает бота по его реферальной ссылке.</div>
+                        </div>
+
+						<!-- Backward compatibility hidden flag (not shown) -->
+						<input type="hidden" id="enable_fixed_referral_bonus" name="enable_fixed_referral_bonus" value="{% if settings.enable_fixed_referral_bonus == 'true' %}true{% else %}false{% endif %}" />
+
 						<div class="mb-3">
 							<label class="form-label" for="referral_discount">Скидка для нового пользователя на первую покупку (%)</label>
-							<input class="form-control" type="number" id="referral_discount" name="referral_discount" value="{{ settings.referral_discount or '5' }}" />
+							<input class="form-control pill-md" type="number" id="referral_discount" name="referral_discount" value="{{ settings.referral_discount or '5' }}" />
 						</div>
 					</div>
 				</div>

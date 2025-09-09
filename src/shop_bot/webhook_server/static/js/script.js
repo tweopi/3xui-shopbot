@@ -646,6 +646,96 @@ document.addEventListener('DOMContentLoaded', function () {
     initializeThemeToggle();
     initializeCsrfForForms();
 
+    // Referrals UI (settings): show/hide fields by reward type and sync legacy toggle
+    (function(){
+        const select = document.getElementById('referral_reward_type');
+        const compatToggle = document.getElementById('enable_fixed_referral_bonus');
+        const sections = Array.from(document.querySelectorAll('[data-ref-section]'));
+        if (!select || sections.length === 0) return;
+        function apply(){
+            const val = (select.value || 'percent_purchase').trim();
+            sections.forEach(sec => {
+                const show = sec.getAttribute('data-ref-section') === val;
+                sec.style.display = show ? '' : 'none';
+                sec.querySelectorAll('input,select,textarea,button').forEach(el => el.disabled = !show);
+            });
+            if (compatToggle) compatToggle.value = (val === 'fixed_purchase') ? 'true' : 'false';
+        }
+        apply();
+        select.addEventListener('change', apply);
+    })();
+
+    // Soft-select for referral_reward_type (pretty dropdown like in Admin Keys)
+    (function(){
+        const wrap = document.querySelector('.soft-select[data-target="referral_reward_type"]');
+        const selectEl = document.getElementById('referral_reward_type');
+        if (!wrap || !selectEl) return;
+        const toggleEl = document.getElementById('referral_reward_type_toggle');
+        const menuEl = document.getElementById('referral_reward_type_menu');
+        if (!toggleEl || !menuEl) return;
+
+        function build(){
+            // Render menu items
+            menuEl.innerHTML = '';
+            const opts = Array.from(selectEl.options||[]);
+            opts.forEach(opt => {
+                const item = document.createElement('div');
+                item.className = 'soft-select-item' + (opt.selected ? ' is-active' : '');
+                item.dataset.value = opt.value;
+                item.textContent = opt.textContent || '';
+                item.addEventListener('click', () => {
+                    selectEl.value = opt.value;
+                    // active visual
+                    menuEl.querySelectorAll('.soft-select-item').forEach(n => n.classList.remove('is-active'));
+                    item.classList.add('is-active');
+                    // update toggle text
+                    toggleEl.textContent = opt.textContent || '';
+                    closeMenu();
+                    // fire change
+                    selectEl.dispatchEvent(new Event('change', { bubbles:true }));
+                });
+                menuEl.appendChild(item);
+            });
+            const active = opts.find(o=>o.selected) || opts[0];
+            toggleEl.textContent = active ? (active.textContent||'') : '';
+        }
+
+        function placeMenu(){
+            const r = toggleEl.getBoundingClientRect();
+            menuEl.style.position='fixed';
+            menuEl.style.left = `${Math.round(r.left)}px`;
+            menuEl.style.top = `${Math.round(r.bottom + 6)}px`;
+            menuEl.style.width = `${Math.round(r.width)}px`;
+            menuEl.style.zIndex = '1065';
+        }
+        function openMenu(){
+            if (menuEl.parentElement !== document.body) document.body.appendChild(menuEl);
+            placeMenu();
+            wrap.classList.add('open');
+            menuEl.style.display='block';
+            window.addEventListener('scroll', placeMenu, true);
+            window.addEventListener('resize', placeMenu, true);
+        }
+        function closeMenu(){
+            wrap.classList.remove('open');
+            menuEl.style.display='none';
+            if (menuEl.parentElement === document.body) wrap.appendChild(menuEl);
+            window.removeEventListener('scroll', placeMenu, true);
+            window.removeEventListener('resize', placeMenu, true);
+        }
+
+        toggleEl.addEventListener('click', (e)=>{
+            e.stopPropagation();
+            if (wrap.classList.contains('open')) closeMenu(); else openMenu();
+        });
+        document.addEventListener('click', (e)=>{ if (!wrap.contains(e.target)) closeMenu(); });
+        document.addEventListener('keydown', (e)=>{ if (e.key==='Escape') closeMenu(); });
+
+        // Rebuild on external changes
+        selectEl.addEventListener('change', build);
+        build();
+    })();
+
     // Inline edit rows (URL/Имя хоста)
     document.querySelectorAll('[data-edit-row]').forEach(row => {
         const input = row.querySelector('[data-edit-target]');
