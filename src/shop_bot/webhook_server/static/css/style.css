@@ -200,6 +200,57 @@
 #burger {
 	display: none;
 }
+/* Базовые стили бургер-меню (будут активированы на малых экранах) */
+.burger-menu { display: none; }
+label.burger_img {
+  display: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: color-mix(in oklab, var(--bg-surface) 85%, transparent);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+}
+/* Иконка "гамбургера" через псевдоэлемент */
+label.burger_img::before {
+  content: "\2630"; /* ☰ */
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+/* Выпадающее меню бургера */
+.bm .burger-menu {
+  position: absolute;
+  right: 0;
+  top: 46px;
+  min-width: 200px;
+  max-width: calc(100vw - 24px); /* не даём меню выходить за край экрана */
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--ui-radius) + 2px);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.28);
+  z-index: 1200;
+}
+.bm .burger-menu a { word-break: break-word; }
+.bm .burger-menu ul { list-style: none; padding: 8px; margin: 0; }
+.bm .burger-menu li { margin: 2px 0; }
+.bm .burger-menu a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.bm .burger-menu a:hover {
+  background: color-mix(in oklab, var(--primary-color) 18%, transparent);
+}
+
+/* Показ меню при активном чекбоксе */
+#burger:checked ~ .burger-menu { display: block; }
 html, body { height: 100%; font-size: calc(16px * var(--ui-font-scale)); }
 /* Предотвращаем горизонтальный рывок из-за появления/скрытия вертикального скроллбара */
 html { scrollbar-gutter: stable; }
@@ -750,6 +801,56 @@ body.login-page {
 .header-controls .bot-control p { margin:0; line-height:1; }
 .user-session-controls { display:flex; align-items:center; gap:12px; }
 
+/* ====== Мобильная адаптация шапки и бургера ====== */
+@media (max-width: 992px) {
+  /* Скрываем центральную навигацию, используем бургер */
+  .navigation { display: none !important; }
+
+  /* Разрешаем перенос элементов шапки на вторую строку */
+  .main-header { flex-wrap: wrap; }
+  /* Сжимаем внутренние отступы шапки на мобильных */
+  .main-header { padding: 8px 12px; }
+  /* Чуть уменьшаем боковые поля контейнера, чтобы элементы не «выползали» */
+  .container { padding-left: 12px; padding-right: 12px; }
+
+  /* Делаем .bm частью флекс-раскладки шапки, без абсолютного позиционирования */
+  .bm {
+    position: relative; /* для позиционирования выпадающего меню */
+    display: flex;
+    align-items: center;
+    margin-left: 0; /* не отталкиваем контролы за край */
+    order: 2; /* бургер идёт перед правым блоком */
+  }
+  .header-controls {
+    order: 3;
+    margin-left: auto;
+    flex: 1 1 100%; /* на второй строке растягиваем на всю ширину */
+    justify-content: flex-end; /* выравниваем кнопки вправо */
+    flex-wrap: wrap; /* разрешаем перенос самих кнопок */
+  }
+  .brand { order: 1; }
+  /* .navigation скрыта, но на всякий случай оставим порядок */
+  .navigation { order: 4; }
+  label.burger_img { display: inline-flex; }
+
+  /* Чуть уменьшаем отступы справа, чтобы не наезжало на контролы */
+  .header-controls { gap: 10px; }
+
+  /* Компактнее зона статуса и убираем разделитель, чтобы экономить место */
+  .bot-control { border-right: 0; padding-right: 0; gap: 8px; }
+  .header-controls .btn, .header-controls .btn-sm { padding: 5px 10px; font-size: .9rem; }
+
+  /* Убедимся, что выпадающее меню перекрывает прочий контент в шапке */
+  .main-header { z-index: 20; }
+}
+
+@media (max-width: 576px) {
+  /* Компактнее правый блок в совсем узких окнах */
+  /* скрываем только первый текстовый span "Вы вошли в систему.", не трогая .theme-label внутри кнопки */
+  .user-session-controls > span { display: none; }
+  .header-controls { gap: 8px; }
+}
+
 .main-footer {
 	margin-top: 40px;
 	padding-top: 20px;
@@ -894,8 +995,8 @@ body.login-page {
 	display: flex;
 	align-items: center;
 	gap: 15px;
-	border-right: 1px solid var(--border-color);
-	padding-right: 20px;
+	border-right: 0; /* убираем разделительную полосу */
+	padding-right: 0;
 }
 
 .bot-control p {
