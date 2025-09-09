@@ -111,20 +111,31 @@ document.addEventListener('DOMContentLoaded', function () {
     function initializePasswordToggles() {
         const togglePasswordButtons = document.querySelectorAll('.toggle-password');
         togglePasswordButtons.forEach(button => {
-            button.addEventListener('click', function () {
-                const parent = this.closest('.form-group') || this.closest('.password-wrapper');
-                if (!parent) return;
-
-                const passwordInput = parent.querySelector('input');
-                if (!passwordInput) return;
-
-                if (passwordInput.type === 'password') {
-                    passwordInput.type = 'text';
-                    this.textContent = '';
-                } else {
-                    passwordInput.type = 'password';
-                    this.textContent = '';
+            // Инициализируем иконку согласно текущему состоянию
+            const parent = button.closest('.password-wrapper') || button.closest('.form-group') || document;
+            const input = parent.querySelector('input[type="password"], input[type="text"]');
+            const setIcon = () => {
+                if (!input) return;
+                const isHidden = input.type === 'password';
+                // если внутри уже есть SVG/иконка — не перетираем, только title/aria
+                if (!button.querySelector('svg')) {
+                    button.textContent = isHidden ? '👁️' : '🙈';
                 }
+                button.setAttribute('aria-label', isHidden ? 'Показать пароль' : 'Скрыть пароль');
+                button.setAttribute('title', isHidden ? 'Показать' : 'Скрыть');
+            };
+            setIcon();
+
+            button.addEventListener('click', function () {
+                const scope = this.closest('.password-wrapper') || this.closest('.form-group') || document;
+                const passwordInput = scope.querySelector('input[type="password"], input[type="text"]');
+                if (!passwordInput) return;
+                if (passwordInput.type === 'password') {
+                    try { passwordInput.type = 'text'; } catch(_) {}
+                } else {
+                    try { passwordInput.type = 'password'; } catch(_) {}
+                }
+                setIcon();
             });
         });
     }
