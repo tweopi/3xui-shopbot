@@ -629,7 +629,9 @@ body.login-page {
     color: var(--text-muted);
     text-decoration: none;
     margin-right: 4px;
-    padding: 8px 14px;
+    padding: 6px 12px; /* компактнее, чтобы не раздувалось */
+    height: 36px; /* фиксированная высота плашки */
+    line-height: 1; /* исключаем вертикальное расползание */
     border-radius: 999px;
     border: 1px solid transparent;
     transition: background-color 0.2s, color 0.2s, border-color 0.2s;
@@ -641,9 +643,10 @@ body.login-page {
 
 .navigation .nav-link.active {
     color: #fff;
-    background: var(--primary-color);
-    border-color: color-mix(in oklab, var(--primary-color) 40%, var(--border-color));
-    box-shadow: 0 6px 14px rgba(174,62,201,0.25);
+    /* более деликатная заливка, чтобы не казалось раздутым */
+    background: color-mix(in oklab, var(--primary-color) 22%, transparent);
+    border-color: color-mix(in oklab, var(--primary-color) 65%, var(--border-color));
+    box-shadow: 0 2px 6px rgba(174,62,201,0.18);
 }
 
 /* Кнопки справа — нормализованные стили */
