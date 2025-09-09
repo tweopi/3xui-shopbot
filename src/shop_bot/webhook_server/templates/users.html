@@ -167,17 +167,34 @@
     const input = document.getElementById('users-search');
     const table = document.getElementById('users-table');
     if (!input || !table) return;
-    const rows = Array.from(table.querySelectorAll('tbody tr'));
     function norm(s){ return (s||'').toString().toLowerCase().trim(); }
-    input.addEventListener('input', function(){
+    function getRows(){
+      // Берём только реальные строки с пользователями, исключая скрытые блоки ключей
+      return Array.from(table.querySelectorAll('tbody > tr')).filter(tr => !tr.classList.contains('keys-row'));
+    }
+    function applyFilter(){
       const q = norm(input.value);
-      rows.forEach(tr => {
+      getRows().forEach(tr => {
         const id = norm(tr.querySelector('.user-id')?.textContent);
         const name = norm(tr.querySelector('.user-name')?.textContent);
         const ok = !q || id.includes(q) || name.includes(q);
         tr.style.display = ok ? '' : 'none';
       });
-    });
+    }
+    input.addEventListener('input', applyFilter);
+    input.addEventListener('keyup', applyFilter);
+    input.addEventListener('search', applyFilter); // для очистки через крестик
+    // При автообновлении tbody — снова применяем фильтр
+    (function(){
+      const tbody = document.getElementById('users-tbody');
+      if (!tbody) return;
+      let t = null;
+      const obs = new MutationObserver(() => {
+        clearTimeout(t);
+        t = setTimeout(applyFilter, 50);
+      });
+      obs.observe(tbody, { childList: true, subtree: true });
+    })();
     // Тоггл строки с ключами
     table.addEventListener('click', function(e){
       const btn = e.target.closest('[data-toggle="keys"]');

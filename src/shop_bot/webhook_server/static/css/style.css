@@ -687,6 +687,19 @@ body.login-page {
     background: color-mix(in oklab, var(--primary-color) 15%, transparent);
     color: #fff;
 }
+
+/* Users page — rounded search input */
+#users-search {
+    border-radius: 999px !important;
+    height: 36px;
+    padding: 6px 14px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    min-width: 260px;
+}
+#users-search::placeholder { color: var(--text-muted); opacity: .85; }
+#users-search:focus { outline: none; border-color: var(--primary-color); box-shadow: 0 0 0 .15rem rgba(174,62,201,.25); }
 .header-controls .btn-success {
     background: var(--success-color);
     border-color: var(--success-color);
