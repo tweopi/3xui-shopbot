@@ -1902,10 +1902,13 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             "customer_email": metadata.get('customer_email')
         })
 
+        # Определяем payment_id для лога: берём из metadata, если есть (например, при отложенных транзакциях), иначе генерируем новый UUID
+        payment_id_for_log = metadata.get('payment_id') or str(uuid.uuid4())
+
         log_transaction(
             username=log_username,
             transaction_id=None,
-            payment_id=internal_payment_id,
+            payment_id=payment_id_for_log,
             user_id=user_id,
             status=log_status,
             amount_rub=log_amount_rub,
