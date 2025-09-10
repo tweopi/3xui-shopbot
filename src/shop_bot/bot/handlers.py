@@ -1788,6 +1788,10 @@ async def process_successful_payment(bot: Bot, metadata: dict):
     )
     try:
         email = ""
+        # Цена нужна ниже вне зависимости от ветки
+        price = float(metadata.get('price'))
+        result = None
+        # Определяем email для операции и вызываем панель для обеих веток (new/extend)
         if action == "new":
             # Сформируем email в формате {username}@bot.local с авто-суффиксом при коллизиях
             user_data = get_user(user_id) or {}
@@ -1806,28 +1810,33 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                     candidate_local = f"{base_local}-{int(datetime.now().timestamp())}"
                     candidate_email = f"{candidate_local}@bot.local"
                     break
-
-            result = await xui_api.create_or_update_key_on_host(
-                host_name=host_name,
-                email=candidate_email,
-                days_to_add=int(months * 30)
-            )
-            if not result:
-                await processing_message.edit_text("❌ Не удалось создать/обновить ключ в панели.")
+        else:
+            # Продление существующего ключа — достаём email по key_id
+            existing_key = get_key_by_id(key_id)
+            if not existing_key or not existing_key.get('key_email'):
+                await processing_message.edit_text("❌ Не удалось найти ключ для продления.")
                 return
+            candidate_email = existing_key['key_email']
 
-            if action == "new":
-                key_id = add_new_key(
-                    user_id=user_id,
-                    host_name=host_name,
-                    xui_client_uuid=result['client_uuid'],
-                    key_email=result['email'],
-                    expiry_timestamp_ms=result['expiry_timestamp_ms']
-                )
-            elif action == "extend":
-                update_key_info(key_id, result['client_uuid'], result['expiry_timestamp_ms'])
-        
-            price = float(metadata.get('price')) 
+        result = await xui_api.create_or_update_key_on_host(
+            host_name=host_name,
+            email=candidate_email,
+            days_to_add=int(months * 30)
+        )
+        if not result:
+            await processing_message.edit_text("❌ Не удалось создать/обновить ключ в панели.")
+            return
+
+        if action == "new":
+            key_id = add_new_key(
+                user_id=user_id,
+                host_name=host_name,
+                xui_client_uuid=result['client_uuid'],
+                key_email=result['email'],
+                expiry_timestamp_ms=result['expiry_timestamp_ms']
+            )
+        elif action == "extend":
+            update_key_info(key_id, result['client_uuid'], result['expiry_timestamp_ms'])
 
             user_data = get_user(user_id)
             referrer_id = user_data.get('referred_by')
@@ -1920,8 +1929,14 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         
         await processing_message.delete()
         
-        connection_string = result['connection_string']
-        new_expiry_date = datetime.fromtimestamp(result['expiry_timestamp_ms'] / 1000)
+        connection_string = None
+        new_expiry_date = None
+        try:
+            connection_string = result.get('connection_string') if isinstance(result, dict) else None
+            new_expiry_date = datetime.fromtimestamp(result['expiry_timestamp_ms'] / 1000) if isinstance(result, dict) and 'expiry_timestamp_ms' in result else None
+        except Exception:
+            connection_string = None
+            new_expiry_date = None
         
         all_user_keys = get_user_keys(user_id)
         key_number = next((i + 1 for i, key in enumerate(all_user_keys) if key['key_id'] == key_id), len(all_user_keys))
@@ -1929,8 +1944,8 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         final_text = get_purchase_success_text(
             action="создан" if action == "new" else "продлен",
             key_number=key_number,
-            expiry_date=new_expiry_date,
-            connection_string=connection_string
+            expiry_date=new_expiry_date or datetime.now(),
+            connection_string=connection_string or ""
         )
         
         await bot.send_message(
