@@ -162,23 +162,99 @@
   </div>
 </div>
 
-<script>
+  <script>
   (function(){
     const input = document.getElementById('users-search');
     const table = document.getElementById('users-table');
     if (!input || !table) return;
     function norm(s){ return (s||'').toString().toLowerCase().trim(); }
+    // Храним раскрытые ключи между автообновлениями
+    const LS_KEY = 'users_open_keys_ids';
+    function loadOpenSet(){
+      try{
+        const raw = localStorage.getItem(LS_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return new Set(Array.isArray(arr) ? arr : []);
+      } catch(_){ return new Set(); }
+    }
+    function saveOpenSet(set){
+      try{ localStorage.setItem(LS_KEY, JSON.stringify(Array.from(set))); }catch(_){}
+    }
+    const openSet = loadOpenSet();
+    function getMainTbody(){
+      // Берём только главный tbody таблицы пользователей (первый уровень)
+      return table.tBodies && table.tBodies.length ? table.tBodies[0] : table.querySelector('tbody');
+    }
     function getRows(){
-      // Берём только реальные строки с пользователями, исключая скрытые блоки ключей
-      return Array.from(table.querySelectorAll('tbody > tr')).filter(tr => !tr.classList.contains('keys-row'));
+      // Только прямые дочерние строки главного tbody, исключая keys-row
+      const tbody = getMainTbody();
+      if (!tbody) return [];
+      return Array.from(tbody.children).filter(tr => tr.tagName === 'TR' && !tr.classList.contains('keys-row'));
+    }
+    function getKeysRowByUid(uid){ return document.getElementById('keys-' + uid); }
+    function openKeysForUid(uid){
+      const row = getKeysRowByUid(uid);
+      if (!row) return;
+      row.style.display = '';
+      openSet.add(String(uid));
+      saveOpenSet(openSet);
+      // Подсветка/состояние кнопки
+      const btn = table.querySelector(`[data-toggle="keys"][data-user="${uid}"]`);
+      if (btn){
+        btn.classList.add('btn-secondary');
+        btn.classList.remove('btn-outline-secondary');
+      }
+    }
+    function closeKeysForUid(uid){
+      const row = getKeysRowByUid(uid);
+      if (!row) return;
+      row.style.display = 'none';
+      openSet.delete(String(uid));
+      saveOpenSet(openSet);
+      const btn = table.querySelector(`[data-toggle="keys"][data-user="${uid}"]`);
+      if (btn){
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-outline-secondary');
+      }
+    }
+    function restoreOpenedKeys(){
+      // Восстанавливаем состояние после перерисовки tbody
+      openSet.forEach(uid => {
+        const row = getKeysRowByUid(uid);
+        if (row) {
+          row.style.display = '';
+          const btn = table.querySelector(`[data-toggle="keys"][data-user="${uid}"]`);
+          if (btn){
+            btn.classList.add('btn-secondary');
+            btn.classList.remove('btn-outline-secondary');
+          }
+        }
+      });
     }
     function applyFilter(){
       const q = norm(input.value);
-      getRows().forEach(tr => {
+      const rows = getRows();
+      rows.forEach(tr => {
         const id = norm(tr.querySelector('.user-id')?.textContent);
         const name = norm(tr.querySelector('.user-name')?.textContent);
         const ok = !q || id.includes(q) || name.includes(q);
         tr.style.display = ok ? '' : 'none';
+      });
+      // Синхронизируем видимость строк ключей с видимостью родительской строки пользователя
+      // Показываем keys-row только если пользовательская строка видима и он числится открытым в openSet
+      const tbody = getMainTbody();
+      const allKeysRows = tbody ? Array.from(tbody.querySelectorAll(':scope > tr.keys-row')) : [];
+      allKeysRows.forEach(kr => {
+        const uid = (kr.id || '').replace('keys-', '');
+        const userRow = getRows().find(r => r.querySelector('.user-id')?.textContent?.trim() === uid);
+        const userVisible = userRow && userRow.style.display !== 'none';
+        const shouldShow = userVisible && openSet.has(String(uid));
+        kr.style.display = shouldShow ? '' : 'none';
+        const btn = table.querySelector(`[data-toggle="keys"][data-user="${uid}"]`);
+        if (btn){
+          btn.classList.toggle('btn-secondary', shouldShow);
+          btn.classList.toggle('btn-outline-secondary', !shouldShow);
+        }
       });
     }
     input.addEventListener('input', applyFilter);
@@ -191,7 +267,7 @@
       let t = null;
       const obs = new MutationObserver(() => {
         clearTimeout(t);
-        t = setTimeout(applyFilter, 50);
+        t = setTimeout(() => { applyFilter(); restoreOpenedKeys(); }, 50);
       });
       obs.observe(tbody, { childList: true, subtree: true });
     })();
@@ -203,9 +279,11 @@
       const row = document.getElementById('keys-' + uid);
       if (!row) return;
       const isHidden = window.getComputedStyle(row).display === 'none';
-      row.style.display = isHidden ? '' : 'none';
-      btn.classList.toggle('btn-outline-secondary', !isHidden);
-      btn.classList.toggle('btn-secondary', isHidden);
+      if (isHidden){
+        openKeysForUid(uid);
+      } else {
+        closeKeysForUid(uid);
+      }
     });
 
     // Открытие модалки баланса с предустановленным знаком (+/-)
