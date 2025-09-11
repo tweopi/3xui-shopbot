@@ -276,6 +276,24 @@ def run_migration():
                 logging.info(" -> The column 'subscription_url' is successfully added to 'xui_hosts'.")
             else:
                 logging.info(" -> The column 'subscription_url' already exists in 'xui_hosts'.")
+            # Agent columns for per-host speedtest
+            if 'agent_url' not in xh_columns:
+                try:
+                    cursor.execute("ALTER TABLE xui_hosts ADD COLUMN agent_url TEXT")
+                    logging.info(" -> The column 'agent_url' is successfully added to 'xui_hosts'.")
+                except Exception as e:
+                    logging.warning(f" -> Failed to add 'agent_url': {e}")
+            else:
+                logging.info(" -> The column 'agent_url' already exists in 'xui_hosts'.")
+            if 'agent_token' not in xh_columns:
+                try:
+                    cursor.execute("ALTER TABLE xui_hosts ADD COLUMN agent_token TEXT")
+                    logging.info(" -> The column 'agent_token' is successfully added to 'xui_hosts'.")
+                except Exception as e:
+                    logging.warning(f" -> Failed to add 'agent_token': {e}")
+            else:
+                logging.info(" -> The column 'agent_token' already exists in 'xui_hosts'.")
+            
             # Clean up host_name values from invisible spaces and trim
             try:
                 cursor.execute(
@@ -369,6 +387,28 @@ def update_host_subscription_url(host_name: str, subscription_url: str | None) -
             return True
     except sqlite3.Error as e:
         logging.error(f"Failed to update subscription_url for host '{host_name}': {e}")
+        return False
+
+def update_host_agent_info(host_name: str, agent_url: str | None, agent_token: str | None) -> bool:
+    """Обновить настройки лёгкого агента для указанного хоста."""
+    try:
+        host_name = normalize_host_name(host_name)
+        agent_url = (agent_url or '').strip() or None
+        agent_token = (agent_token or '').strip() or None
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
+            if cursor.fetchone() is None:
+                logging.warning(f"update_host_agent_info: host not found by name='{host_name}'")
+                return False
+            cursor.execute(
+                "UPDATE xui_hosts SET agent_url = ?, agent_token = ? WHERE TRIM(host_name) = TRIM(?)",
+                (agent_url, agent_token, host_name)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update agent settings for host '{host_name}': {e}")
         return False
 
 def set_referral_start_bonus_received(user_id: int) -> bool:

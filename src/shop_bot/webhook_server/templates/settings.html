@@ -143,6 +143,17 @@
 					<input class="form-control pill" type="text" name="host_subscription_url" placeholder="Ссылка подписки для этого хоста" value="{{ host.subscription_url or '' }}" />
 					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить ссылку</button>
 				</form>
+
+                <!-- Лёгкий агент: URL и токен -->
+                <form action="{{ url_for('save_host_agent_settings_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="host_name" value="{{ host.host_name }}" />
+                    <input class="form-control pill" type="url" name="agent_url" placeholder="URL лёгкого агента (например, http://IP:8080)" value="{{ host.agent_url or '' }}" style="min-width: 260px;" />
+                    <input class="form-control pill" type="password" name="agent_token" placeholder="Токен агента (опц.)" value="{{ host.agent_token or '' }}" style="min-width: 220px; margin-left:6px;" />
+                    <button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить агента</button>
+                    <button type="button" class="btn btn-primary btn-sm pill" data-action="host-speedtest" data-host="{{ host.host_name }}" title="Запустить speedtest на хосте" style="margin-left:6px;">Измерить скорость</button>
+                </form>
+
 				<div class="plans-section">
 					<h4>Тарифы:</h4>
 					{% if host.plans %}
