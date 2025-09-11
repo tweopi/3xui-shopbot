@@ -65,8 +65,14 @@ if [ -f "$NGINX_CONF_FILE" ]; then
         echo -e "${GREEN}Выбран локальный клиент speedtest (внутри панели).${NC}"
     fi
 
-    echo -e "\n${CYAN}Шаг 3: Пересборка и перезапуск Docker-контейнеров...${NC}"
-    sudo docker-compose down --remove-orphans && sudo docker-compose build --no-cache && sudo docker-compose up -d
+    echo -e "\n${CYAN}Шаг 3: Пересборка и перезапуск панели (необязательно)${NC}"
+    read_input "Пересобрать панель сейчас? [y/N]: " REBUILD_PANEL
+    REBUILD_PANEL=${REBUILD_PANEL:-N}
+    if [[ "$REBUILD_PANEL" =~ ^[Yy]$ ]]; then
+        sudo docker-compose down --remove-orphans && sudo docker-compose build --no-cache && sudo docker-compose up -d
+    else
+        echo -e "${YELLOW}Пропускаем пересборку панели.${NC}"
+    fi
     
     echo -e "\n\n${GREEN}==============================================${NC}"
     echo -e "${GREEN}      🎉 Обновление успешно завершено! 🎉      ${NC}"
@@ -214,11 +220,17 @@ else
     echo -e "${GREEN}Выбран локальный клиент speedtest (внутри панели).${NC}"
 fi
 
-echo -e "\n${CYAN}Шаг 6: Сборка и запуск Docker-контейнера панели...${NC}"
-if [ "$(sudo docker-compose ps -q)" ]; then
-    sudo docker-compose down
+echo -e "\n${CYAN}Шаг 6: Сборка и запуск панели (необязательно)${NC}"
+read_input "Собрать/перезапустить панель сейчас? [y/N]: " REBUILD_PANEL
+REBUILD_PANEL=${REBUILD_PANEL:-N}
+if [[ "$REBUILD_PANEL" =~ ^[Yy]$ ]]; then
+    if [ "$(sudo docker-compose ps -q)" ]; then
+        sudo docker-compose down
+    fi
+    sudo docker-compose build --no-cache && sudo docker-compose up -d
+else
+    echo -e "${YELLOW}Пропускаем сборку панели на данном этапе.${NC}"
 fi
-sudo docker-compose build --no-cache && sudo docker-compose up -d
 
 echo -e "\n\n${GREEN}=====================================================${NC}"
 echo -e "${GREEN}      🎉 Установка и запуск успешно завершены! 🎉      ${NC}"
