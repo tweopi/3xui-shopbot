@@ -42,9 +42,10 @@ def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🎁 Выдать ключ", callback_data="admin_gift_key")
     builder.button(text="⚡ Тест скорости", callback_data="admin_speedtest")
     builder.button(text="➕ Добавить админа", callback_data="admin_add_admin")
+    builder.button(text="➖ Снять админа", callback_data="admin_remove_admin")
     builder.button(text="📢 Рассылка", callback_data="start_broadcast")
     builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
-    builder.adjust(2, 2, 2, 1)
+    builder.adjust(2, 2, 3, 1)
     return builder.as_markup()
 
 def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int = 10) -> InlineKeyboardMarkup:

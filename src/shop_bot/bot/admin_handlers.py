@@ -695,11 +695,32 @@ def get_admin_router() -> Router:
                 target_id = None
         # Если @username
         if target_id is None and raw.startswith('@'):
+            uname = raw.lstrip('@')
+            # 1) Пробуем как передано (@username)
             try:
                 chat = await message.bot.get_chat(raw)
                 target_id = int(chat.id)
             except Exception:
                 target_id = None
+            # 2) Пробуем без @ (username)
+            if target_id is None:
+                try:
+                    chat = await message.bot.get_chat(uname)
+                    target_id = int(chat.id)
+                except Exception:
+                    target_id = None
+            # 3) Фолбэк: ищем пользователя в локальной БД по username
+            if target_id is None:
+                try:
+                    users = get_all_users() or []
+                    uname_low = uname.lower()
+                    for u in users:
+                        u_un = (u.get('username') or '').lstrip('@').lower()
+                        if u_un and u_un == uname_low:
+                            target_id = int(u.get('telegram_id') or u.get('user_id') or u.get('id'))
+                            break
+                except Exception:
+                    target_id = None
         if target_id is None:
             await message.answer("❌ Не удалось распознать ID/username. Отправьте корректное значение или нажмите Отмена.")
             return
@@ -712,6 +733,94 @@ def get_admin_router() -> Router:
             ids_str = ",".join(str(i) for i in sorted(ids))
             update_setting("admin_telegram_ids", ids_str)
             await message.answer(f"✅ Пользователь {target_id} добавлен в администраторы.")
+        except Exception as e:
+            await message.answer(f"❌ Ошибка при сохранении: {e}")
+        await state.clear()
+        # Показать админ-меню снова
+        try:
+            await show_admin_menu(message)
+        except Exception:
+            pass
+
+    # --- Снятие прав администратора ---
+    class AdminRemoveAdmin(StatesGroup):
+        waiting_for_input = State()
+
+    @admin_router.callback_query(F.data == "admin_remove_admin")
+    async def admin_remove_admin_entry(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await state.set_state(AdminRemoveAdmin.waiting_for_input)
+        await callback.message.edit_text(
+            "Введите ID пользователя или его @username, которого нужно снять из админов:\n\n"
+            "Примеры: 123456789 или @username",
+            reply_markup=keyboards.create_admin_cancel_keyboard()
+        )
+
+    @admin_router.message(AdminRemoveAdmin.waiting_for_input)
+    async def admin_remove_admin_process(message: types.Message, state: FSMContext):
+        if not is_admin(message.from_user.id):
+            return
+        raw = (message.text or '').strip()
+        target_id: int | None = None
+        # Попытка распарсить как число
+        if raw.isdigit():
+            try:
+                target_id = int(raw)
+            except Exception:
+                target_id = None
+        # Резолвим username (@username или username)
+        if target_id is None:
+            uname = raw.lstrip('@')
+            # 1) Пробуем как введено
+            try:
+                chat = await message.bot.get_chat(raw)
+                target_id = int(chat.id)
+            except Exception:
+                target_id = None
+            # 2) Пробуем без @
+            if target_id is None and uname:
+                try:
+                    chat = await message.bot.get_chat(uname)
+                    target_id = int(chat.id)
+                except Exception:
+                    target_id = None
+            # 3) Фолбэк: поиск в БД
+            if target_id is None and uname:
+                try:
+                    users = get_all_users() or []
+                    uname_low = uname.lower()
+                    for u in users:
+                        u_un = (u.get('username') or '').lstrip('@').lower()
+                        if u_un and u_un == uname_low:
+                            target_id = int(u.get('telegram_id') or u.get('user_id') or u.get('id'))
+                            break
+                except Exception:
+                    target_id = None
+        if target_id is None:
+            await message.answer("❌ Не удалось распознать ID/username. Отправьте корректное значение или нажмите Отмена.")
+            return
+        # Обновляем настройки админов
+        try:
+            from shop_bot.data_manager.database import get_admin_ids, update_setting
+            ids = set(get_admin_ids())
+            if target_id not in ids:
+                await message.answer(f"ℹ️ Пользователь {target_id} не является администратором.")
+                await state.clear()
+                try:
+                    await show_admin_menu(message)
+                except Exception:
+                    pass
+                return
+            if len(ids) <= 1:
+                await message.answer("❌ Нельзя снять последнего администратора.")
+                return
+            ids.discard(int(target_id))
+            ids_str = ",".join(str(i) for i in sorted(ids))
+            update_setting("admin_telegram_ids", ids_str)
+            await message.answer(f"✅ Пользователь {target_id} снят с администраторов.")
         except Exception as e:
             await message.answer(f"❌ Ошибка при сохранении: {e}")
         await state.clear()
