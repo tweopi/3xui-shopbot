@@ -143,6 +143,50 @@
 					<input class="form-control pill" type="text" name="host_subscription_url" placeholder="Ссылка подписки для этого хоста" value="{{ host.subscription_url or '' }}" />
 					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить ссылку</button>
 				</form>
+                <!-- SSH настройки для speedtest на удалённом хосте -->
+                <div class="card glass" style="margin: 8px 0;">
+                  <div class="card-body">
+                    <h4 class="card-title" style="margin-bottom:8px;">SSH для Speedtest</h4>
+                    <form action="{{ url_for('update_host_ssh_route') }}" method="post" class="form-inline">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                      <input type="hidden" name="host_name" value="{{ host.host_name }}" />
+                      <div class="row g-2">
+                        <div class="col-12 col-md-3">
+                          <label class="form-label" for="ssh_host_{{ loop.index }}">SSH Host</label>
+                          <input id="ssh_host_{{ loop.index }}" type="text" class="form-control pill" name="ssh_host" value="{{ host.ssh_host or '' }}" placeholder="example.com или 1.2.3.4" />
+                        </div>
+                        <div class="col-6 col-md-2">
+                          <label class="form-label" for="ssh_port_{{ loop.index }}">Port</label>
+                          <input id="ssh_port_{{ loop.index }}" type="number" class="form-control pill" name="ssh_port" value="{{ host.ssh_port or '' }}" placeholder="22" />
+                        </div>
+                        <div class="col-6 col-md-2">
+                          <label class="form-label" for="ssh_user_{{ loop.index }}">User</label>
+                          <input id="ssh_user_{{ loop.index }}" type="text" class="form-control pill" name="ssh_user" value="{{ host.ssh_user or '' }}" placeholder="root" />
+                        </div>
+                        <div class="col-12 col-md-5">
+                          <label class="form-label" for="ssh_password_{{ loop.index }}">Пароль (или оставьте пустым при ключе)</label>
+                          <input id="ssh_password_{{ loop.index }}" type="password" class="form-control pill" name="ssh_password" value="{{ host.ssh_password or '' }}" />
+                        </div>
+                        <div class="col-12 col-md-7">
+                          <label class="form-label" for="ssh_key_path_{{ loop.index }}">Путь к приватному ключу (на сервере панели)</label>
+                          <input id="ssh_key_path_{{ loop.index }}" type="text" class="form-control pill" name="ssh_key_path" value="{{ host.ssh_key_path or '' }}" placeholder="/app/keys/id_rsa" />
+                          <small class="text-secondary">Если указан ключ — пароль может быть пустым.</small>
+                        </div>
+                        <div class="col-12 col-md-5 d-flex align-items-end">
+                          <button type="submit" class="btn btn-primary btn-sm pill">Сохранить SSH</button>
+                          <button type="submit"
+                                  class="btn btn-outline-secondary btn-sm pill"
+                                  style="margin-left:8px;"
+                                  title="Автоустановка speedtest-клиента на хосте по SSH"
+                                  formaction="{{ url_for('auto_install_speedtest_route', host_name=host.host_name) }}">
+                            Автоустановка Speedtest
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                    <!-- Блок тестов скорости перенесён на Главную страницу -->
+                  </div>
+                </div>
 				<div class="plans-section">
 					<h4>Тарифы:</h4>
 					{% if host.plans %}

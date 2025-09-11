@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 from shop_bot.modules import xui_api
 from shop_bot.bot import handlers 
 from shop_bot.support_bot_controller import SupportBotController
+from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager.database import (
     get_all_settings, update_setting, get_all_hosts, get_plans_for_host,
     create_host, delete_host, create_plan, delete_plan, update_plan, get_user_count,
@@ -30,7 +31,7 @@ from shop_bot.data_manager.database import (
     get_tickets_paginated, get_open_tickets_count, get_ticket, get_ticket_messages,
     add_support_message, set_ticket_status, delete_ticket,
     get_closed_tickets_count, get_all_tickets_count, update_host_subscription_url,
-    update_host_url, update_host_name,
+    update_host_url, update_host_name, update_host_ssh_settings, get_latest_speedtest, get_speedtests,
     get_all_keys, get_keys_for_user, get_key_by_id, delete_key_by_id, update_key_comment, update_key_info,
     add_new_key, get_balance, adjust_user_balance, get_referrals_for_user,
     get_user, get_key_by_email
@@ -174,11 +175,21 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/dashboard')
     @login_required
     def dashboard_page():
+        hosts = []
+        try:
+            hosts = get_all_hosts()
+            for h in hosts:
+                try:
+                    h['latest_speedtest'] = get_latest_speedtest(h['host_name'])
+                except Exception:
+                    h['latest_speedtest'] = None
+        except Exception:
+            hosts = []
         stats = {
             "user_count": get_user_count(),
             "total_keys": get_total_keys_count(),
             "total_spent": get_total_spent_sum(),
-            "host_count": len(get_all_hosts())
+            "host_count": len(hosts)
         }
         
         page = request.args.get('page', 1, type=int)
@@ -197,8 +208,18 @@ def create_webhook_app(bot_controller_instance):
             transactions=transactions,
             current_page=page,
             total_pages=total_pages,
+            hosts=hosts,
             **common_data
         )
+
+    @flask_app.route('/dashboard/run-speedtests', methods=['POST'])
+    @login_required
+    def run_speedtests_route():
+        try:
+            speedtest_runner.run_speedtests_for_all_hosts()
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
 
     # Partials for dashboard fragments (auto-update without reload)
     @flask_app.route('/dashboard/stats.partial')
@@ -559,16 +580,17 @@ def create_webhook_app(bot_controller_instance):
             from datetime import datetime, timedelta
             if isinstance(cur_expiry, str):
                 try:
-                    cur_dt = datetime.fromisoformat(cur_expiry)
+                    from datetime import datetime as dt
+                    exp_dt = dt.fromisoformat(cur_expiry)
                 except Exception:
                     # fallback: если в БД дата как 'YYYY-MM-DD HH:MM:SS'
                     try:
-                        cur_dt = datetime.strptime(cur_expiry, '%Y-%m-%d %H:%M:%S')
+                        exp_dt = datetime.strptime(cur_expiry, '%Y-%m-%d %H:%M:%S')
                     except Exception:
-                        cur_dt = datetime.utcnow()
+                        exp_dt = datetime.utcnow()
             else:
-                cur_dt = cur_expiry or datetime.utcnow()
-            new_dt = cur_dt + timedelta(days=delta_days)
+                exp_dt = cur_expiry or datetime.utcnow()
+            new_dt = exp_dt + timedelta(days=delta_days)
             new_ms = int(new_dt.timestamp() * 1000)
 
             # 1) Применяем новый срок на 3xui (чтобы дата в панели совпадала с реальной)
@@ -630,6 +652,7 @@ def create_webhook_app(bot_controller_instance):
                         from datetime import datetime as dt
                         exp_dt = dt.fromisoformat(exp)
                     except Exception:
+                        # fallback: если в БД дата как 'YYYY-MM-DD HH:MM:SS'
                         try:
                             exp_dt = datetime.strptime(exp, '%Y-%m-%d %H:%M:%S')
                         except Exception:
@@ -675,6 +698,118 @@ def create_webhook_app(bot_controller_instance):
         ok = update_key_comment(key_id, comment)
         flash('Комментарий обновлён.' if ok else 'Не удалось обновить комментарий.', 'success' if ok else 'danger')
         return redirect(request.referrer or url_for('admin_keys_page'))
+
+    # --- Host SSH settings update ---
+    @flask_app.route('/admin/hosts/ssh/update', methods=['POST'])
+    @login_required
+    def update_host_ssh_route():
+        host_name = (request.form.get('host_name') or '').strip()
+        ssh_host = (request.form.get('ssh_host') or '').strip() or None
+        ssh_port_raw = (request.form.get('ssh_port') or '').strip()
+        ssh_user = (request.form.get('ssh_user') or '').strip() or None
+        ssh_password = request.form.get('ssh_password')  # allow empty to clear
+        ssh_key_path = (request.form.get('ssh_key_path') or '').strip() or None
+        ssh_port = None
+        try:
+            ssh_port = int(ssh_port_raw) if ssh_port_raw else None
+        except Exception:
+            ssh_port = None
+        ok = update_host_ssh_settings(host_name, ssh_host=ssh_host, ssh_port=ssh_port, ssh_user=ssh_user,
+                                      ssh_password=ssh_password, ssh_key_path=ssh_key_path)
+        flash('SSH-параметры обновлены.' if ok else 'Не удалось обновить SSH-параметры.', 'success' if ok else 'danger')
+        return redirect(request.referrer or url_for('settings_page'))
+
+    # --- Host speedtest run & fetch ---
+    @flask_app.route('/admin/hosts/<host_name>/speedtest/run', methods=['POST'])
+    @login_required
+    def run_host_speedtest_route(host_name: str):
+        method = (request.form.get('method') or '').strip().lower()
+        try:
+            if method == 'ssh':
+                res = asyncio.run(speedtest_runner.run_and_store_ssh_speedtest(host_name))
+            elif method == 'net':
+                res = asyncio.run(speedtest_runner.run_and_store_net_probe(host_name))
+            else:
+                # both
+                res = asyncio.run(speedtest_runner.run_both_for_host(host_name))
+        except Exception as e:
+            res = {'ok': False, 'error': str(e)}
+        wants_json = 'application/json' in (request.headers.get('Accept') or '') or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        if wants_json:
+            return jsonify(res)
+        flash(('Тест выполнен.' if res and res.get('ok') else f"Ошибка теста: {res.get('error') if res else 'unknown'}"), 'success' if res and res.get('ok') else 'danger')
+        return redirect(request.referrer or url_for('settings_page'))
+
+    @flask_app.route('/admin/hosts/<host_name>/speedtests.json')
+    @login_required
+    def host_speedtests_json(host_name: str):
+        try:
+            limit = int(request.args.get('limit') or 20)
+        except Exception:
+            limit = 20
+        try:
+            items = get_speedtests(host_name, limit=limit) or []
+            return jsonify({
+                'ok': True,
+                'items': items
+            })
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)}), 500
+
+    @flask_app.route('/admin/speedtests/run-all', methods=['POST'])
+    @login_required
+    def run_all_speedtests_route():
+        # Запустить тесты для всех хостов (оба варианта)
+        try:
+            hosts = get_all_hosts()
+        except Exception:
+            hosts = []
+        errors = []
+        ok_count = 0
+        for h in hosts:
+            name = h.get('host_name')
+            if not name:
+                continue
+            try:
+                res = asyncio.run(speedtest_runner.run_both_for_host(name))
+                if res and res.get('ok'):
+                    ok_count += 1
+                else:
+                    errors.append(f"{name}: {res.get('error') if res else 'unknown'}")
+            except Exception as e:
+                errors.append(f"{name}: {e}")
+
+        wants_json = 'application/json' in (request.headers.get('Accept') or '') or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        if wants_json:
+            return jsonify({"ok": len(errors) == 0, "done": ok_count, "total": len(hosts), "errors": errors})
+        if errors:
+            flash(f"Выполнено для {ok_count}/{len(hosts)}. Ошибки: {'; '.join(errors[:3])}{'…' if len(errors) > 3 else ''}", 'warning')
+        else:
+            flash(f"Тесты скорости выполнены для всех хостов: {ok_count}/{len(hosts)}", 'success')
+        return redirect(request.referrer or url_for('dashboard_page'))
+
+    # --- Host speedtest auto-install ---
+    @flask_app.route('/admin/hosts/<host_name>/speedtest/install', methods=['POST'])
+    @login_required
+    def auto_install_speedtest_route(host_name: str):
+        # Supports both HTML form and AJAX
+        try:
+            res = asyncio.run(speedtest_runner.auto_install_speedtest_on_host(host_name))
+        except Exception as e:
+            res = {'ok': False, 'log': str(e)}
+        wants_json = 'application/json' in (request.headers.get('Accept') or '') or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        if wants_json:
+            return jsonify({"ok": bool(res.get('ok')), "log": res.get('log')})
+        flash(('Установка завершена успешно.' if res.get('ok') else 'Не удалось установить speedtest на хост.') , 'success' if res.get('ok') else 'danger')
+        # Сохраним логи в flash (урезанно)
+        try:
+            log = res.get('log') or ''
+            short = '\n'.join((log.splitlines() or [])[-20:])
+            if short:
+                flash(short, 'secondary')
+        except Exception:
+            pass
+        return redirect(request.referrer or url_for('settings_page'))
 
     @flask_app.route('/admin/balance')
     @login_required
@@ -878,7 +1013,6 @@ def create_webhook_app(bot_controller_instance):
             logger.warning(f"Failed to process forum topic deletion for ticket {ticket_id} before deletion: {e}")
         if delete_ticket(ticket_id):
             flash(f"Тикет #{ticket_id} удалён.", 'success')
-            return redirect(url_for('support_list_page'))
         else:
             flash(f"Не удалось удалить тикет #{ticket_id}.", 'danger')
             return redirect(url_for('support_ticket_page', ticket_id=ticket_id))
@@ -887,20 +1021,24 @@ def create_webhook_app(bot_controller_instance):
     @login_required
     def settings_page():
         if request.method == 'POST':
+            # Смена пароля панели (если поле не пустое)
             if 'panel_password' in request.form and request.form.get('panel_password'):
                 update_setting('panel_password', request.form.get('panel_password'))
 
-            for checkbox_key in ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus']:
+            # Обработка чекбоксов, где в форме идёт hidden=false + checkbox=true
+            checkbox_keys = ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus']
+            for checkbox_key in checkbox_keys:
                 values = request.form.getlist(checkbox_key)
                 value = values[-1] if values else 'false'
-                update_setting(checkbox_key, 'true' if value == 'true' else 'false')
+                update_setting(checkbox_key, value)
 
+            # Обновление остальных настроек из ALL_SETTINGS_KEYS (кроме panel_password и чекбоксов)
             for key in ALL_SETTINGS_KEYS:
-                if key in ['panel_password', 'force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus']:
+                if key in checkbox_keys or key == 'panel_password':
                     continue
-                update_setting(key, request.form.get(key, ''))
+                if key in request.form:
+                    update_setting(key, request.form.get(key))
 
-            # Единый тост об успехе сохранения настроек
             flash('Настройки сохранены.', 'success')
             next_hash = (request.form.get('next_hash') or '').strip() or '#panel'
             next_tab = (next_hash[1:] if next_hash.startswith('#') else next_hash) or 'panel'
@@ -910,6 +1048,11 @@ def create_webhook_app(bot_controller_instance):
         hosts = get_all_hosts()
         for host in hosts:
             host['plans'] = get_plans_for_host(host['host_name'])
+            # добавить последний результат спидтеста в карточку
+            try:
+                host['latest_speedtest'] = get_latest_speedtest(host['host_name'])
+            except Exception:
+                host['latest_speedtest'] = None
         
         common_data = get_common_template_data()
         return render_template('settings.html', settings=current_settings, hosts=hosts, **common_data)

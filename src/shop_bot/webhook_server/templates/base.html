@@ -23,7 +23,9 @@
 		<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 
 		<!-- Charts -->
-		<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <!-- Optional: zoom/pan plugin for Chart.js -->
+        <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.umd.min.js"></script>
 	</head>
 	<body data-page="{{ request.endpoint }}" class="layout-boxed">
 		<div class="container">

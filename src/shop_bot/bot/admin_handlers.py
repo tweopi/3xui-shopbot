@@ -12,6 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from shop_bot.bot import keyboards
+from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager.database import (
     get_all_users,
     get_setting,
@@ -93,6 +94,173 @@ def get_admin_router() -> Router:
             return
         await callback.answer()
         await show_admin_menu(callback.message, edit_message=True)
+
+    # --- Speedtest: кнопка в админ-меню -> выбор хоста ---
+    @admin_router.callback_query(F.data == "admin_speedtest")
+    async def admin_speedtest_entry(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        hosts = get_all_hosts() or []
+        if not hosts:
+            await callback.message.answer("⚠️ Хосты не найдены в настройках.")
+            return
+        await callback.message.edit_text(
+            "⚡ Выберите хост для теста скорости:",
+            reply_markup=keyboards.create_admin_hosts_pick_keyboard(hosts, action="speedtest")
+        )
+
+    # --- Speedtest: запуск по выбранному хосту ---
+    @admin_router.callback_query(F.data.startswith("admin_speedtest_pick_host_"))
+    async def admin_speedtest_run(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        host_name = callback.data.replace("admin_speedtest_pick_host_", "", 1)
+
+        # Уведомление всем администраторам о старте
+        try:
+            from shop_bot.data_manager.database import get_admin_ids
+            admin_ids = list({*(get_admin_ids() or []), int(callback.from_user.id)})
+        except Exception:
+            admin_ids = [int(callback.from_user.id)]
+        start_text = f"🚀 Запущен тест скорости для хоста: <b>{host_name}</b> (инициатор: {callback.from_user.id})"
+        for aid in admin_ids:
+            try:
+                await callback.bot.send_message(aid, start_text)
+            except Exception:
+                pass
+
+        # Локальный статус
+        try:
+            wait_msg = await callback.message.answer(f"⏳ Выполняю тест скорости для <b>{host_name}</b>…")
+        except Exception:
+            wait_msg = None
+
+        # Выполнить тест (SSH + NET) и сохранить в БД
+        try:
+            result = await speedtest_runner.run_both_for_host(host_name)
+        except Exception as e:
+            result = {"ok": False, "error": str(e), "details": {}}
+
+        # Текст результата
+        def fmt_part(title: str, d: dict | None) -> str:
+            if not d:
+                return f"<b>{title}:</b> —"
+            if not d.get("ok"):
+                return f"<b>{title}:</b> ❌ {d.get('error') or 'ошибка'}"
+            ping = d.get('ping_ms')
+            down = d.get('download_mbps')
+            up = d.get('upload_mbps')
+            srv = d.get('server_name') or '—'
+            return (f"<b>{title}:</b> ✅\n"
+                    f"• ping: {ping if ping is not None else '—'} ms\n"
+                    f"• ↓ {down if down is not None else '—'} Mbps\n"
+                    f"• ↑ {up if up is not None else '—'} Mbps\n"
+                    f"• сервер: {srv}")
+
+        details = result.get('details') or {}
+        text_res = (
+            f"🏁 Тест скорости завершён для <b>{host_name}</b>\n\n"
+            + fmt_part("SSH", details.get('ssh')) + "\n\n"
+            + fmt_part("NET", details.get('net'))
+        )
+
+        # Локально обновим сообщение
+        if wait_msg:
+            try:
+                await wait_msg.edit_text(text_res)
+            except Exception:
+                await callback.message.answer(text_res)
+        else:
+            await callback.message.answer(text_res)
+
+        # Разослать финал всем админам
+        for aid in admin_ids:
+            if wait_msg and aid == callback.from_user.id:
+                continue
+            try:
+                await callback.bot.send_message(aid, text_res)
+            except Exception:
+                pass
+
+    # --- Speedtest: Назад из выбора хоста ---
+    @admin_router.callback_query(F.data == "admin_speedtest_back_to_users")
+    async def admin_speedtest_back(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await show_admin_menu(callback.message, edit_message=True)
+
+    # --- Speedtest: Запуск для всех хостов ---
+    @admin_router.callback_query(F.data == "admin_speedtest_run_all")
+    async def admin_speedtest_run_all(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        # оповещение админам
+        try:
+            from shop_bot.data_manager.database import get_admin_ids
+            admin_ids = list({*(get_admin_ids() or []), int(callback.from_user.id)})
+        except Exception:
+            admin_ids = [int(callback.from_user.id)]
+        for aid in admin_ids:
+            try:
+                await callback.bot.send_message(aid, "🚀 Запущен тест скорости для всех хостов")
+            except Exception:
+                pass
+        # пробежимся по хостам
+        hosts = get_all_hosts() or []
+        summary_lines = []
+        for h in hosts:
+            name = h.get('host_name')
+            try:
+                res = await speedtest_runner.run_both_for_host(name)
+                ok = res.get('ok')
+                det = res.get('details') or {}
+                dm = det.get('ssh', {}).get('download_mbps') or det.get('net', {}).get('download_mbps')
+                um = det.get('ssh', {}).get('upload_mbps') or det.get('net', {}).get('upload_mbps')
+                summary_lines.append(f"• {name}: {'✅' if ok else '❌'} ↓ {dm or '—'} ↑ {um or '—'}")
+            except Exception as e:
+                summary_lines.append(f"• {name}: ❌ {e}")
+        text = "🏁 Тест для всех завершён:\n" + "\n".join(summary_lines)
+        await callback.message.answer(text)
+        for aid in admin_ids:
+            try:
+                await callback.bot.send_message(aid, text)
+            except Exception:
+                pass
+
+    # --- Speedtest: Автоустановка speedtest на выбранном хосте ---
+    @admin_router.callback_query(F.data.startswith("admin_speedtest_autoinstall_"))
+    async def admin_speedtest_autoinstall(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        host_name = callback.data.replace("admin_speedtest_autoinstall_", "", 1)
+        try:
+            wait = await callback.message.answer(f"🛠 Пытаюсь установить speedtest на <b>{host_name}</b>…")
+        except Exception:
+            wait = None
+        from shop_bot.data_manager.speedtest_runner import auto_install_speedtest_on_host
+        try:
+            res = await auto_install_speedtest_on_host(host_name)
+        except Exception as e:
+            res = {"ok": False, "log": f"Ошибка: {e}"}
+        text = ("✅ Автоустановка завершена успешно" if res.get("ok") else "❌ Автоустановка завершилась с ошибкой")
+        text += f"\n<pre>{(res.get('log') or '')[:3500]}</pre>"
+        if wait:
+            try:
+                await wait.edit_text(text)
+            except Exception:
+                await callback.message.answer(text)
+        else:
+            await callback.message.answer(text)
 
 
     # --- Пользователи: список, пагинация, просмотр ---

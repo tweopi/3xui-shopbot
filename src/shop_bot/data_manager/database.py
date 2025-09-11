@@ -76,7 +76,12 @@ def initialize_db():
                     host_username TEXT NOT NULL,
                     host_pass TEXT NOT NULL,
                     host_inbound_id INTEGER NOT NULL,
-                    subscription_url TEXT
+                    subscription_url TEXT,
+                    ssh_host TEXT,
+                    ssh_port INTEGER,
+                    ssh_user TEXT,
+                    ssh_password TEXT,
+                    ssh_key_path TEXT
                 )
             ''')
             cursor.execute('''
@@ -110,6 +115,23 @@ def initialize_db():
                     FOREIGN KEY (ticket_id) REFERENCES support_tickets (ticket_id)
                 )
             ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS host_speedtests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    host_name TEXT NOT NULL,
+                    method TEXT NOT NULL, -- 'ssh' | 'net'
+                    ping_ms REAL,
+                    jitter_ms REAL,
+                    download_mbps REAL,
+                    upload_mbps REAL,
+                    server_name TEXT,
+                    server_id TEXT,
+                    ok INTEGER NOT NULL DEFAULT 1,
+                    error TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_host_speedtests_host_time ON host_speedtests(host_name, created_at DESC)")
             default_settings = {
                 "panel_login": "admin",
                 "panel_password": "admin",
@@ -276,6 +298,22 @@ def run_migration():
                 logging.info(" -> The column 'subscription_url' is successfully added to 'xui_hosts'.")
             else:
                 logging.info(" -> The column 'subscription_url' already exists in 'xui_hosts'.")
+            # SSH settings for speedtests (optional)
+            if 'ssh_host' not in xh_columns:
+                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_host TEXT")
+                logging.info(" -> The column 'ssh_host' is successfully added to 'xui_hosts'.")
+            if 'ssh_port' not in xh_columns:
+                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_port INTEGER")
+                logging.info(" -> The column 'ssh_port' is successfully added to 'xui_hosts'.")
+            if 'ssh_user' not in xh_columns:
+                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_user TEXT")
+                logging.info(" -> The column 'ssh_user' is successfully added to 'xui_hosts'.")
+            if 'ssh_password' not in xh_columns:
+                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_password TEXT")
+                logging.info(" -> The column 'ssh_password' is successfully added to 'xui_hosts'.")
+            if 'ssh_key_path' not in xh_columns:
+                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_key_path TEXT")
+                logging.info(" -> The column 'ssh_key_path' is successfully added to 'xui_hosts'.")
             # Clean up host_name values from invisible spaces and trim
             try:
                 cursor.execute(
@@ -298,6 +336,33 @@ def run_migration():
                 logging.warning(f" -> Failed to normalize existing host_name values: {e}")
         else:
             logging.warning("Table 'xui_hosts' not found, skipping its migration.")
+        # Create table for host speedtests
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS host_speedtests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    host_name TEXT NOT NULL,
+                    method TEXT NOT NULL, -- 'ssh' | 'net'
+                    ping_ms REAL,
+                    jitter_ms REAL,
+                    download_mbps REAL,
+                    upload_mbps REAL,
+                    server_name TEXT,
+                    server_id TEXT,
+                    ok INTEGER NOT NULL DEFAULT 1,
+                    error TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                '''
+            )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_host_speedtests_host_time ON host_speedtests(host_name, created_at DESC)")
+            conn.commit()
+            logging.info("The table 'host_speedtests' is ready.")
+        except sqlite3.Error as e:
+            logging.error(f"Failed to create 'host_speedtests': {e}")
+
         conn.close()
         
         logging.info("--- The database is successfully completed! ---")
@@ -469,6 +534,46 @@ def get_host(host_name: str) -> dict | None:
         logging.error(f"Error getting host '{host_name}': {e}")
         return None
 
+def update_host_ssh_settings(
+    host_name: str,
+    ssh_host: str | None = None,
+    ssh_port: int | None = None,
+    ssh_user: str | None = None,
+    ssh_password: str | None = None,
+    ssh_key_path: str | None = None,
+) -> bool:
+    """Обновить SSH-параметры для speedtest/maintenance по хосту.
+    Переданные None значения очищают соответствующие поля (ставят NULL).
+    """
+    try:
+        host_name_n = normalize_host_name(host_name)
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name_n,))
+            if cursor.fetchone() is None:
+                logging.warning(f"update_host_ssh_settings: host not found '{host_name_n}'")
+                return False
+            cursor.execute(
+                """
+                UPDATE xui_hosts
+                SET ssh_host = ?, ssh_port = ?, ssh_user = ?, ssh_password = ?, ssh_key_path = ?
+                WHERE TRIM(host_name) = TRIM(?)
+                """,
+                (
+                    (ssh_host or None),
+                    (int(ssh_port) if ssh_port is not None else None),
+                    (ssh_user or None),
+                    (ssh_password if ssh_password is not None else None),
+                    (ssh_key_path or None),
+                    host_name_n,
+                ),
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update SSH settings for host '{host_name}': {e}")
+        return False
+
 def delete_key_by_id(key_id: int) -> bool:
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -509,6 +614,103 @@ def get_all_hosts() -> list[dict]:
     except sqlite3.Error as e:
         logging.error(f"Error getting list of all hosts: {e}")
         return []
+
+def get_speedtests(host_name: str, limit: int = 20) -> list[dict]:
+    """Получить последние результаты спидтестов по хосту (ssh/net), новые сверху."""
+    try:
+        host_name_n = normalize_host_name(host_name)
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            try:
+                limit_int = int(limit)
+            except Exception:
+                limit_int = 20
+            cursor.execute(
+                """
+                SELECT id, host_name, method, ping_ms, jitter_ms, download_mbps, upload_mbps,
+                       server_name, server_id, ok, error, created_at
+                FROM host_speedtests
+                WHERE TRIM(host_name) = TRIM(?)
+                ORDER BY datetime(created_at) DESC
+                LIMIT ?
+                """,
+                (host_name_n, limit_int),
+            )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get speedtests for host '{host_name}': {e}")
+        return []
+
+def get_latest_speedtest(host_name: str) -> dict | None:
+    """Получить последний по времени спидтест для хоста."""
+    try:
+        host_name_n = normalize_host_name(host_name)
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, host_name, method, ping_ms, jitter_ms, download_mbps, upload_mbps,
+                       server_name, server_id, ok, error, created_at
+                FROM host_speedtests
+                WHERE TRIM(host_name) = TRIM(?)
+                ORDER BY datetime(created_at) DESC
+                LIMIT 1
+                """,
+                (host_name_n,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get latest speedtest for host '{host_name}': {e}")
+        return None
+
+def insert_host_speedtest(
+    host_name: str,
+    method: str,
+    ping_ms: float | None = None,
+    jitter_ms: float | None = None,
+    download_mbps: float | None = None,
+    upload_mbps: float | None = None,
+    server_name: str | None = None,
+    server_id: str | None = None,
+    ok: bool = True,
+    error: str | None = None,
+) -> bool:
+    """Сохранить результат спидтеста в таблицу host_speedtests."""
+    try:
+        host_name_n = normalize_host_name(host_name)
+        method_s = (method or '').strip().lower()
+        if method_s not in ('ssh', 'net'):
+            method_s = 'ssh'
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO host_speedtests
+                (host_name, method, ping_ms, jitter_ms, download_mbps, upload_mbps, server_name, server_id, ok, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                '''
+                , (
+                    host_name_n,
+                    method_s,
+                    ping_ms,
+                    jitter_ms,
+                    download_mbps,
+                    upload_mbps,
+                    server_name,
+                    server_id,
+                    1 if ok else 0,
+                    (error or None)
+                )
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to insert host speedtest for '{host_name}': {e}")
+        return False
 
 def get_admin_stats() -> dict:
     """Return aggregated statistics for the admin dashboard.

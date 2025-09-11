@@ -42,6 +42,60 @@
 /* Make soft-select toggle border color match controls for seamless look */
 .soft-select-toggle { border-color: var(--border-color) !important; background: color-mix(in oklab, var(--bg-surface) 90%, transparent) !important; }
 
+/* ===== Soft Select (унифицированный аккуратный стиль) ===== */
+.soft-select { position: relative; display: block; }
+.soft-select .soft-select-toggle {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: color-mix(in oklab, var(--bg-surface) 88%, transparent);
+  color: var(--text-primary);
+  line-height: 1.25;
+  outline: none;
+}
+.soft-select .soft-select-toggle:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 .12rem rgba(174,62,201,.28);
+}
+.soft-select.open .soft-select-toggle {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 .12rem rgba(174,62,201,.22);
+}
+.soft-select .select-soft { display: none; }
+.soft-select .soft-select-menu {
+  display: none;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 14px 32px rgba(0,0,0,.28);
+  padding: 6px;
+  max-height: 48vh;
+  overflow: auto;
+}
+.soft-select .soft-select-item {
+  padding: 8px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.soft-select .soft-select-item:hover { background: color-mix(in oklab, var(--primary-color) 16%, transparent); }
+.soft-select .soft-select-item.is-active {
+  background: color-mix(in oklab, var(--primary-color) 24%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary-color) 40%, transparent);
+}
+
+/* Компактный стиль карточки вверху */
+.card.card-compact .card-body { padding: 10px 12px; }
+.card.glass { background: color-mix(in oklab, var(--bg-card) 70%, transparent); border: 1px solid var(--border-color); border-radius: calc(var(--ui-radius) + 2px); box-shadow: 0 8px 22px rgba(0,0,0,.22); }
+
+/* Мини-кнопки xs */
+.btn.btn-xs { padding: 4px 10px; font-size: .78rem; line-height: 1.2; border-radius: 10px; }
+
+/* Тонкая типографика под подписи */
+.tiny { font-size: .86rem; opacity: .92; }
+
 /* Normalize select look across browsers so icons don't shift */
 .form-select.pill, .form-select.pill-md { -moz-appearance: none; -webkit-appearance: none; appearance: none; padding-right: 2.25rem; }
 

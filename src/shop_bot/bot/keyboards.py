@@ -40,10 +40,11 @@ def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="👥 Пользователи", callback_data="admin_users")
     builder.button(text="🌍 Ключи на хосте", callback_data="admin_host_keys")
     builder.button(text="🎁 Выдать ключ", callback_data="admin_gift_key")
+    builder.button(text="⚡ Тест скорости", callback_data="admin_speedtest")
     builder.button(text="➕ Добавить админа", callback_data="admin_add_admin")
     builder.button(text="📢 Рассылка", callback_data="start_broadcast")
     builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
-    builder.adjust(2, 2, 1, 1)
+    builder.adjust(2, 2, 2, 1)
     return builder.as_markup()
 
 def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int = 10) -> InlineKeyboardMarkup:
@@ -442,11 +443,26 @@ def create_admin_hosts_pick_keyboard(hosts: list[dict], action: str = "gift") ->
     if hosts:
         for h in hosts:
             name = h.get('host_name')
-            builder.button(text=name, callback_data=f"admin_{action}_pick_host_{name}")
+            if action == "speedtest":
+                # Две кнопки в строке: запуск теста и автоустановка
+                builder.button(text=name, callback_data=f"admin_{action}_pick_host_{name}")
+                builder.button(text="🛠 Автоустановка", callback_data=f"admin_speedtest_autoinstall_{name}")
+            else:
+                builder.button(text=name, callback_data=f"admin_{action}_pick_host_{name}")
     else:
         builder.button(text="Хостов нет", callback_data="noop")
+    # Дополнительные опции для speedtest
+    if action == "speedtest":
+        builder.button(text="🚀 Запустить для всех", callback_data="admin_speedtest_run_all")
     builder.button(text="⬅️ Назад", callback_data=f"admin_{action}_back_to_users")
-    builder.adjust(1)
+    # Сетка: по 2 в ряд для speedtest (хост + автоустановка), иначе по 1
+    if action == "speedtest":
+        rows = [2] * (len(hosts) if hosts else 1)
+        tail = [1, 1]
+    else:
+        rows = [1] * (len(hosts) if hosts else 1)
+        tail = [1]
+    builder.adjust(*(rows + tail))
     return builder.as_markup()
 
 def create_admin_keys_for_host_keyboard(host_name: str, keys: list[dict]) -> InlineKeyboardMarkup:

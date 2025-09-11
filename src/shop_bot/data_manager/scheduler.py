@@ -8,6 +8,7 @@ from aiogram import Bot
 
 from shop_bot.bot_controller import BotController
 from shop_bot.data_manager import database
+from shop_bot.data_manager import speedtest_runner
 from shop_bot.modules import xui_api
 from shop_bot.bot import keyboards
 
@@ -16,6 +17,10 @@ NOTIFY_BEFORE_HOURS = {72, 48, 24, 1}
 notified_users = {}
 
 logger = logging.getLogger(__name__)
+
+# Запуск обоих видов измерений 3 раза в сутки (каждые 8 часов)
+SPEEDTEST_INTERVAL_SECONDS = 8 * 3600
+_last_speedtests_run_at: datetime | None = None
 
 def format_time_left(hours: int) -> str:
     if hours >= 24:
@@ -253,6 +258,9 @@ async def periodic_subscription_check(bot_controller: BotController):
         try:
             await sync_keys_with_panels()
 
+            # Периодические измерения скорости по всем хостам (оба варианта: SSH и сетевой)
+            await _maybe_run_periodic_speedtests()
+
             if bot_controller.get_status().get("is_running"):
                 bot = bot_controller.get_bot_instance()
                 if bot:
@@ -267,3 +275,44 @@ async def periodic_subscription_check(bot_controller: BotController):
             
         logger.info(f"Scheduler: Cycle finished. Next check in {CHECK_INTERVAL_SECONDS} seconds.")
         await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+
+async def _maybe_run_periodic_speedtests():
+    global _last_speedtests_run_at
+    now = datetime.now()
+    if _last_speedtests_run_at and (now - _last_speedtests_run_at).total_seconds() < SPEEDTEST_INTERVAL_SECONDS:
+        return
+    try:
+        await _run_speedtests_for_all_hosts()
+        _last_speedtests_run_at = now
+    except Exception as e:
+        logger.error(f"Scheduler: speedtests run failed: {e}", exc_info=True)
+
+async def _run_speedtests_for_all_hosts():
+    hosts = database.get_all_hosts()
+    if not hosts:
+        logger.info("Scheduler: No hosts to speedtest.")
+        return
+    logger.info(f"Scheduler: Running speedtests for {len(hosts)} host(s)...")
+    for h in hosts:
+        host_name = h.get('host_name')
+        if not host_name:
+            continue
+        try:
+            logger.info(f"Scheduler: Speedtest for host '{host_name}' started...")
+            # Ограничим каждый хост таймаутом, чтобы не зависнуть надолго
+            try:
+                async with asyncio.timeout(180):
+                    res = await speedtest_runner.run_both_for_host(host_name)
+            except AttributeError:
+                # Для Python <3.11: fallback через wait_for
+                res = await asyncio.wait_for(speedtest_runner.run_both_for_host(host_name), timeout=180)
+            ok = res.get('ok')
+            err = res.get('error')
+            if ok:
+                logger.info(f"Scheduler: Speedtest for '{host_name}' finished OK")
+            else:
+                logger.warning(f"Scheduler: Speedtest for '{host_name}' finished with errors: {err}")
+        except asyncio.TimeoutError:
+            logger.warning(f"Scheduler: Speedtest timeout for host '{host_name}'")
+        except Exception as e:
+            logger.error(f"Scheduler: Speedtest failed for host '{host_name}': {e}", exc_info=True)
