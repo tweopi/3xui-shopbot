@@ -198,8 +198,13 @@ async def ssh_speedtest_for_host(host_row: dict) -> dict:
 
         # Prefer Ookla CLI json format
         data, err = _ssh_exec_json(ssh, [
+            # Ookla CLI with auto-accept (new flags)
+            'speedtest --accept-license --accept-gdpr -f json',
+            'speedtest --accept-license --accept-gdpr --format=json',
+            # Fallbacks without flags (на случай старых версий, уже принявших лицензию)
             'speedtest -f json',
             'speedtest --format=json',
+            # Python speedtest-cli (sivel)
             'speedtest-cli --json'
         ])
         ssh.close()
@@ -336,14 +341,66 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
             rc, out, err = _ssh_exec(ssh, 'command -v speedtest || command -v speedtest-cli || echo "NO"')
             if 'speedtest' in out or 'speedtest-cli' in out:
                 log_lines.append('Found existing speedtest binary: ' + out.strip())
-                return {'ok': True, 'log': '\n'.join(log_lines)}
+                # Проверим версию и примем лицензию
+                rc2, o2, e2 = _ssh_exec(ssh, 'speedtest --accept-license --accept-gdpr --version || true')
+                ver_text = (o2 + e2).strip()
+                if ver_text:
+                    log_lines.append(('$ speedtest --accept-license --accept-gdpr --version\n' + ver_text).strip())
+                # Если версия не 1.2.0 — выполним переустановку через tarball ниже
+                need_reinstall = True
+                try:
+                    if '1.2.0' in ver_text:
+                        need_reinstall = False
+                except Exception:
+                    need_reinstall = True
+                if not need_reinstall:
+                    return {'ok': True, 'log': '\n'.join(log_lines)}
+                else:
+                    log_lines.append('Different Ookla speedtest version detected; reinstalling 1.2.0 via tarball.')
 
             # Detect OS info
             rc, out, _ = _ssh_exec(ssh, 'cat /etc/os-release || uname -a')
             os_release = out.lower()
             log_lines.append('OS detection: ' + out.strip())
 
-            # Try Ookla official repo script
+            # Сначала: УСТАНОВКА ЧЕРЕЗ TARBALL СТРОГОЙ ВЕРСИИ 1.2.0 (предпочтительно)
+            # Detect arch
+            rc, arch_out, _ = _ssh_exec(ssh, 'uname -m || echo unknown')
+            arch = (arch_out or '').strip()
+            # Map to Ookla naming
+            if arch in ('x86_64', 'amd64'):
+                arch_tag = 'linux-x86_64'
+            elif arch in ('aarch64', 'arm64'):
+                arch_tag = 'linux-aarch64'
+            elif arch in ('armv7l',):
+                arch_tag = 'linux-armhf'
+            else:
+                arch_tag = 'linux-x86_64'
+            tar_url = f'https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-{arch_tag}.tgz'
+            cmds_tar = [
+                f'curl -fsSL {tar_url} -o /tmp/ookla-speedtest.tgz || wget -O /tmp/ookla-speedtest.tgz {tar_url}',
+                'mkdir -p /tmp/ookla-speedtest && tar -xf /tmp/ookla-speedtest.tgz -C /tmp/ookla-speedtest',
+                'install -m 0755 /tmp/ookla-speedtest/speedtest /usr/local/bin/speedtest || (cp /tmp/ookla-speedtest/speedtest /usr/local/bin/speedtest && chmod +x /usr/local/bin/speedtest)',
+                # Принятие лицензии сразу после установки бинаря (идемпотентно)
+                'speedtest --accept-license --accept-gdpr --version || true',
+                'rm -rf /tmp/ookla-speedtest /tmp/ookla-speedtest.tgz'
+            ]
+            for c in cmds_tar:
+                rc, o, e = _ssh_exec(ssh, c)
+                log_lines.append(f'$ {c}\n{o}{e}'.strip())
+
+            # Verify version is exactly 1.2.0
+            rc, out, err = _ssh_exec(ssh, 'command -v speedtest || echo "NO"')
+            if 'NO' not in out:
+                rcv, ov, ev = _ssh_exec(ssh, 'speedtest --version 2>&1 || true')
+                ver_info = (ov + ev).strip()
+                if '1.2.0' in ver_info:
+                    log_lines.append('Installed Ookla speedtest via tarball (1.2.0): ' + out.strip())
+                    return {'ok': True, 'log': '\n'.join(log_lines)}
+                else:
+                    log_lines.append('Tarball install finished but version check did not return 1.2.0; continuing fallbacks.')
+
+            # Если по какой-то причине tarball не сработал — пробуем официальный репозиторий (м.б. недоступен на noble)
             cmds_deb = [
                 'which sudo || true',
                 'export DEBIAN_FRONTEND=noninteractive',
@@ -371,6 +428,10 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
             rc, out, err = _ssh_exec(ssh, 'command -v speedtest || command -v speedtest-cli || echo "NO"')
             if 'speedtest' in out or 'speedtest-cli' in out:
                 log_lines.append('Installed speedtest successfully: ' + out.strip())
+                # Автопринятие лицензии для Ookla CLI, если присутствует
+                rc2, o2, e2 = _ssh_exec(ssh, 'speedtest --accept-license --accept-gdpr --version || true')
+                if o2 or e2:
+                    log_lines.append(('$ speedtest --accept-license --accept-gdpr --version\n' + (o2 + e2)).strip())
                 return {'ok': True, 'log': '\n'.join(log_lines)}
 
             # Fallback: try install speedtest-cli via pip
@@ -392,36 +453,8 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
                 log_lines.append('Installed speedtest-cli via pip: ' + out.strip())
                 return {'ok': True, 'log': '\n'.join(log_lines)}
 
-            # Ultimate fallback: download Ookla tarball and install binary
-            # Detect arch
-            rc, arch_out, _ = _ssh_exec(ssh, 'uname -m || echo unknown')
-            arch = (arch_out or '').strip()
-            # Map to Ookla naming
-            if arch in ('x86_64', 'amd64'):
-                arch_tag = 'linux-x86_64'
-            elif arch in ('aarch64', 'arm64'):
-                arch_tag = 'linux-aarch64'
-            elif arch in ('armv7l',):
-                arch_tag = 'linux-armhf'
-            else:
-                arch_tag = 'linux-x86_64'
-            # Try a known stable version first; can be adjusted later
-            tar_url = f'https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-{arch_tag}.tgz'
-            cmds_tar = [
-                f'curl -fsSL {tar_url} -o /tmp/ookla-speedtest.tgz || wget -O /tmp/ookla-speedtest.tgz {tar_url}',
-                'mkdir -p /tmp/ookla-speedtest && tar -xf /tmp/ookla-speedtest.tgz -C /tmp/ookla-speedtest',
-                'install -m 0755 /tmp/ookla-speedtest/speedtest /usr/local/bin/speedtest || (cp /tmp/ookla-speedtest/speedtest /usr/local/bin/speedtest && chmod +x /usr/local/bin/speedtest)',
-                'rm -rf /tmp/ookla-speedtest /tmp/ookla-speedtest.tgz'
-            ]
-            for c in cmds_tar:
-                rc, o, e = _ssh_exec(ssh, c)
-                log_lines.append(f'$ {c}\n{o}{e}'.strip())
-
-            # Check again for speedtest binary
-            rc, out, err = _ssh_exec(ssh, 'command -v speedtest || command -v speedtest-cli || echo "NO"')
-            if 'NO' not in out:
-                log_lines.append('Installed speedtest via tarball: ' + out.strip())
-                return {'ok': True, 'log': '\n'.join(log_lines)}
+            # Последний фоллбек: ставим python-пакет speedtest-cli (не Ookla), если всё остальное не сработало
+            # (этот шаг оставлен выше по коду — уже выполнен; если не сработал — выдаём ошибку ниже)
 
             return {'ok': False, 'log': 'Failed to install speedtest using available methods.\n' + '\n'.join(log_lines)}
         finally:
