@@ -14,14 +14,11 @@ from math import ceil
 from flask import Flask, request, render_template, redirect, url_for, flash, session, current_app, jsonify
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 import secrets
-import urllib.request
-import urllib.error
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from shop_bot.modules import xui_api
-from shop_bot.modules.speedtest_manager import speedtest_manager
 from shop_bot.bot import handlers 
 from shop_bot.support_bot_controller import SupportBotController
 from shop_bot.data_manager.database import (
@@ -33,7 +30,7 @@ from shop_bot.data_manager.database import (
     get_tickets_paginated, get_open_tickets_count, get_ticket, get_ticket_messages,
     add_support_message, set_ticket_status, delete_ticket,
     get_closed_tickets_count, get_all_tickets_count, update_host_subscription_url,
-    update_host_url, update_host_name, update_host_agent_info,
+    update_host_url, update_host_name,
     get_all_keys, get_keys_for_user, get_key_by_id, delete_key_by_id, update_key_comment, update_key_info,
     add_new_key, get_balance, adjust_user_balance, get_referrals_for_user,
     get_user, get_key_by_email
@@ -229,123 +226,6 @@ def create_webhook_app(bot_controller_instance):
     def dashboard_charts_json():
         data = get_daily_stats_for_charts(days=30)
         return jsonify(data)
-
-    # --- Host agent settings & per-host speedtest ---
-    @flask_app.route('/admin/hosts/agent/save', methods=['POST'])
-    @login_required
-    def save_host_agent_settings_route():
-        host_name = (request.form.get('host_name') or '').strip()
-        agent_url = (request.form.get('agent_url') or '').strip()
-        agent_token = (request.form.get('agent_token') or '').strip()
-        if not host_name:
-            flash('Не указан хост', 'danger')
-            return redirect(url_for('settings_page'))
-        ok = update_host_agent_info(host_name, agent_url or None, agent_token or None)
-        flash('Настройки агента сохранены.' if ok else 'Не удалось сохранить настройки агента.', 'success' if ok else 'danger')
-        return redirect(url_for('settings_page'))
-
-    @flask_app.route('/admin/hosts/<host_name>/speedtest', methods=['POST'])
-    @login_required
-    def run_host_speedtest_route(host_name: str):
-        """Запускает speedtest на указанном хосте через лёгкий агент."""
-        # Получаем данные хоста, чтобы взять agent_url/token
-        host = None
-        for h in get_all_hosts():
-            if (h.get('host_name') or '').strip() == (host_name or '').strip():
-                host = h
-                break
-        if not host:
-            return jsonify({"ok": False, "error": "host_not_found"}), 404
-        agent_url = (host.get('agent_url') or '').strip()
-        agent_token = (host.get('agent_token') or '').strip()
-        if not agent_url:
-            return jsonify({"ok": False, "error": "agent_not_configured"}), 400
-        # Формируем запрос к агенту: POST /speedtest { force:true }
-        try:
-            url = agent_url.rstrip('/') + '/speedtest'
-            payload = json.dumps({"force": True}).encode('utf-8')
-            req = urllib.request.Request(url, data=payload, method='POST')
-            req.add_header('Content-Type', 'application/json')
-            if agent_token:
-                req.add_header('Authorization', f'Bearer {agent_token}')
-            with urllib.request.urlopen(req, timeout=240) as resp:
-                body = resp.read().decode('utf-8')
-                data = json.loads(body)
-        except urllib.error.HTTPError as e:
-            try:
-                body = e.read().decode('utf-8')
-                err = json.loads(body)
-            except Exception:
-                err = {"error": e.reason, "code": e.code}
-            return jsonify({"ok": False, "error": err}), 502
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 502
-
-        # Ожидаем от агента поля: download_speed, upload_speed, ping, isp, external_ip, server_name, server_country, timestamp
-        if not isinstance(data, dict):
-            return jsonify({"ok": False, "error": "invalid_agent_response"}), 502
-        return jsonify({"ok": True, "data": data})
-
-    # --- Speedtest routes ---
-    @flask_app.route('/speedtest/run', methods=['POST'])
-    @login_required
-    def run_speedtest():
-        """Запуск теста скорости"""
-        force = request.json.get('force', False) if request.is_json else False
-        
-        try:
-            result = speedtest_manager.run_speed_test(force=force)
-            if result:
-                return jsonify({
-                    "success": True,
-                    "data": result
-                })
-            else:
-                return jsonify({
-                    "success": False,
-                    "error": "Не удалось выполнить тест скорости"
-                }), 500
-        except Exception as e:
-            logger.error(f"Ошибка при выполнении speedtest: {e}")
-            return jsonify({
-                "success": False,
-                "error": str(e)
-            }), 500
-
-    @flask_app.route('/speedtest/status')
-    @login_required
-    def speedtest_status():
-        """Получение статуса и результатов speedtest"""
-        try:
-            status = speedtest_manager.get_test_status()
-            results = speedtest_manager.get_cached_results()
-            
-            return jsonify({
-                "success": True,
-                "status": status,
-                "results": results
-            })
-        except Exception as e:
-            logger.error(f"Ошибка при получении статуса speedtest: {e}")
-            return jsonify({
-                "success": False,
-                "error": str(e)
-            }), 500
-
-    @flask_app.route('/speedtest/widget.partial')
-    @login_required
-    def speedtest_widget_partial():
-        """Partial для виджета speedtest"""
-        try:
-            status = speedtest_manager.get_test_status()
-            results = speedtest_manager.get_cached_results()
-            
-            return render_template('partials/speedtest_widget.html', 
-                                 status=status, results=results)
-        except Exception as e:
-            logger.error(f"Ошибка при рендеринге speedtest widget: {e}")
-            return render_template('partials/speedtest_widget.html', 
-                                 status=None, results=None, error=str(e))
 
     # --- Support partials ---
     @flask_app.route('/support/table.partial')

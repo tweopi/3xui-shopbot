@@ -633,48 +633,6 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch(_) {}
     }
 
-    // Speedtest widget: AJAX submit and soft refresh
-    function initializeSpeedtestWidget() {
-        document.addEventListener('submit', async function (e) {
-            const form = e.target;
-            if (!form || form.id !== 'speedtest-form') return;
-            e.preventDefault();
-            const action = form.getAttribute('action') || '/speedtest/run';
-            const token = (function(){
-                const meta = document.querySelector('meta[name="csrf-token"]');
-                return meta ? meta.getAttribute('content') : '';
-            })();
-            try {
-                // Disable button while running
-                const btn = form.querySelector('button[type="submit"]');
-                if (btn) { btn.disabled = true; btn.textContent = 'Тест выполняется...'; }
-                const resp = await fetch(action, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': token
-                    },
-                    body: JSON.stringify({ force: true })
-                });
-                if (resp.redirected) { window.location.href = resp.url; return; }
-                if (resp.status === 401 || resp.status === 403) { window.location.href = '/login'; return; }
-                let ok = resp.ok;
-                try {
-                    const data = await resp.json();
-                    ok = ok && data && data.success !== false;
-                } catch(_) { /* ignore parse errors */ }
-                try { window.showToast(ok ? 'success' : 'danger', ok ? 'Тест скорости запущен' : 'Не удалось запустить тест'); } catch(_){}
-            } catch(_) {
-                try { window.showToast('danger', 'Ошибка сети при запуске теста'); } catch(__){}
-            } finally {
-                // Refresh widget content regardless of result
-                try { await window.refreshContainerById('speedtest-widget'); } catch(_){}
-            }
-        }, true);
-    }
-
     // Initialize modules once DOM is ready
     initTooltipsWithin(document);
     initializePasswordToggles();
@@ -687,48 +645,6 @@ document.addEventListener('DOMContentLoaded', function () {
     initializeSettingsTabs();
     initializeThemeToggle();
     initializeCsrfForForms();
-    initializeSpeedtestWidget();
-
-    // Per-host speedtest (Settings -> Hosts): handle button clicks
-    (function(){
-        document.addEventListener('click', async function(e){
-            const btn = e.target.closest('[data-action="host-speedtest"]');
-            if (!btn) return;
-            const host = btn.getAttribute('data-host');
-            if (!host) return;
-            btn.disabled = true; const prev = btn.textContent; btn.textContent = 'Измеряем...';
-            try {
-                const tokenMeta = document.querySelector('meta[name="csrf-token"]');
-                const token = tokenMeta ? tokenMeta.getAttribute('content') : '';
-                const resp = await fetch(`/admin/hosts/${encodeURIComponent(host)}/speedtest`, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'Accept': 'application/json',
-                        'X-CSRFToken': token
-                    }
-                });
-                if (resp.redirected) { window.location.href = resp.url; return; }
-                if (!resp.ok) {
-                    try { window.showToast('danger', 'Ошибка запроса к агенту'); } catch(_){}
-                    return;
-                }
-                const data = await resp.json();
-                if (!data || data.ok === false) {
-                    const msg = (data && data.error) ? (typeof data.error === 'string' ? data.error : JSON.stringify(data.error)) : 'Не удалось выполнить speedtest на хосте';
-                    try { window.showToast('danger', msg); } catch(_){}
-                    return;
-                }
-                const r = data.data || {};
-                const text = `↓ ${r.download_speed||'?'} Мбит/с, ↑ ${r.upload_speed||'?'} Мбит/с, ping ${r.ping||'?'} мс`;
-                try { window.showToast('success', `Скорость на ${host}: ${text}`); } catch(_){}
-            } catch(_) {
-                try { window.showToast('danger', 'Ошибка сети'); } catch(__){}
-            } finally {
-                btn.disabled = false; btn.textContent = prev;
-            }
-        });
-    })();
 
     // Referrals UI (settings): show/hide fields by reward type and sync legacy toggle
     (function(){

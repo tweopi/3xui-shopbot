@@ -41,38 +41,8 @@ if [ -f "$NGINX_CONF_FILE" ]; then
     git pull
     echo -e "${GREEN}✔ Код успешно обновлен.${NC}"
 
-    echo -e "\n${CYAN}Шаг 2: Выбор клиента Speedtest...${NC}"
-    echo -e "1) Локальный клиент (внутри панели, по умолчанию)"
-    echo -e "2) Лёгкий агент (на каждом хосте отдельно)"
-    read_input "Выберите вариант [1/2] (по умолчанию 1): " SPEEDTEST_CHOICE
-    SPEEDTEST_CHOICE=${SPEEDTEST_CHOICE:-1}
-
-    if [ "$SPEEDTEST_CHOICE" = "2" ]; then
-        echo -e "\n${CYAN}Сборка образа лёгкого агента speedtest...${NC}"
-        sudo docker build -t shopbot-speedtest-agent ./agent || { echo -e "${RED}Не удалось собрать агент.${NC}"; exit 1; }
-        AG_TOKEN=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 36)
-        mkdir -p ./agent
-        echo -n "$AG_TOKEN" > ./agent/AGENT_TOKEN.txt
-        echo -e "${GREEN}✔ Агент собран. Пример запуска на удалённом хосте:${NC}"
-        echo -e "docker run -d --name speedtest-agent -p 8080:8080 -e AGENT_TOKEN='${AG_TOKEN}' --restart unless-stopped shopbot-speedtest-agent"
-        echo -e "\n${YELLOW}В панели на странице Настройки → Хосты для каждого хоста укажите:${NC}"
-        echo -e "  - Agent URL: http://IP_ХОСТА:8080"
-        echo -e "  - Agent Token: ${AG_TOKEN}"
-        echo -e "\n${CYAN}Токен также сохранён в файл:${NC} ${YELLOW}./agent/AGENT_TOKEN.txt${NC}"
-        echo -e "${CYAN}Скопируйте его и вставьте в панель.${NC}"
-        echo -e "После запуска агента нажмите 'Измерить скорость' в карточке хоста."
-    else
-        echo -e "${GREEN}Выбран локальный клиент speedtest (внутри панели).${NC}"
-    fi
-
-    echo -e "\n${CYAN}Шаг 3: Пересборка и перезапуск панели (необязательно)${NC}"
-    read_input "Пересобрать панель сейчас? [y/N]: " REBUILD_PANEL
-    REBUILD_PANEL=${REBUILD_PANEL:-N}
-    if [[ "$REBUILD_PANEL" =~ ^[Yy]$ ]]; then
-        sudo docker-compose down --remove-orphans && sudo docker-compose build --no-cache && sudo docker-compose up -d
-    else
-        echo -e "${YELLOW}Пропускаем пересборку панели.${NC}"
-    fi
+    echo -e "\n${CYAN}Шаг 2: Пересборка и перезапуск Docker-контейнеров...${NC}"
+    sudo docker-compose down --remove-orphans && sudo docker-compose up -d --build
     
     echo -e "\n\n${GREEN}==============================================${NC}"
     echo -e "${GREEN}      🎉 Обновление успешно завершено! 🎉      ${NC}"
@@ -196,41 +166,11 @@ echo -e "${GREEN}✔ Конфигурация Nginx создана.${NC}"
 echo -e "${YELLOW}Проверяем и перезагружаем Nginx...${NC}"
 sudo nginx -t && sudo systemctl reload nginx
 
-echo -e "\n${CYAN}Шаг 5: Выбор клиента Speedtest...${NC}"
-echo -e "1) Локальный клиент (внутри панели, по умолчанию)"
-echo -e "2) Лёгкий агент (на каждом хосте отдельно)"
-read_input "Выберите вариант [1/2] (по умолчанию 1): " SPEEDTEST_CHOICE
-SPEEDTEST_CHOICE=${SPEEDTEST_CHOICE:-1}
-
-if [ "$SPEEDTEST_CHOICE" = "2" ]; then
-    echo -e "\n${CYAN}Сборка образа лёгкого агента speedtest...${NC}"
-    sudo docker build -t shopbot-speedtest-agent ./agent || { echo -e "${RED}Не удалось собрать агент.${NC}"; exit 1; }
-    AG_TOKEN=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 36)
-    mkdir -p ./agent
-    echo -n "$AG_TOKEN" > ./agent/AGENT_TOKEN.txt
-    echo -e "${GREEN}✔ Агент собран. Пример запуска на удалённом хосте:${NC}"
-    echo -e "docker run -d --name speedtest-agent -p 8080:8080 -e AGENT_TOKEN='${AG_TOKEN}' --restart unless-stopped shopbot-speedtest-agent"
-    echo -e "\n${YELLOW}В панели на странице Настройки → Хосты для каждого хоста укажите:${NC}"
-    echo -e "  - Agent URL: http://IP_ХОСТА:8080"
-    echo -e "  - Agent Token: ${AG_TOKEN}"
-    echo -e "\n${CYAN}Токен также сохранён в файл:${NC} ${YELLOW}./agent/AGENT_TOKEN.txt${NC}"
-    echo -e "${CYAN}Скопируйте его и вставьте в панель.${NC}"
-    echo -e "После запуска агента нажмите 'Измерить скорость' в карточке хоста."
-else
-    echo -e "${GREEN}Выбран локальный клиент speedtest (внутри панели).${NC}"
+echo -e "\n${CYAN}Шаг 5: Сборка и запуск Docker-контейнера...${NC}"
+if [ "$(sudo docker-compose ps -q)" ]; then
+    sudo docker-compose down
 fi
-
-echo -e "\n${CYAN}Шаг 6: Сборка и запуск панели (необязательно)${NC}"
-read_input "Собрать/перезапустить панель сейчас? [y/N]: " REBUILD_PANEL
-REBUILD_PANEL=${REBUILD_PANEL:-N}
-if [[ "$REBUILD_PANEL" =~ ^[Yy]$ ]]; then
-    if [ "$(sudo docker-compose ps -q)" ]; then
-        sudo docker-compose down
-    fi
-    sudo docker-compose build --no-cache && sudo docker-compose up -d
-else
-    echo -e "${YELLOW}Пропускаем сборку панели на данном этапе.${NC}"
-fi
+sudo docker-compose up -d --build
 
 echo -e "\n\n${GREEN}=====================================================${NC}"
 echo -e "${GREEN}      🎉 Установка и запуск успешно завершены! 🎉      ${NC}"
