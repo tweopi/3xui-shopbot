@@ -404,6 +404,56 @@ def get_admin_router() -> Router:
         except Exception:
             pass
 
+    # --- Подменю администраторов ---
+    @admin_router.callback_query(F.data == "admin_admins_menu")
+    async def admin_admins_menu_entry(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await callback.message.edit_text(
+            "👮 <b>Управление администраторами</b>",
+            reply_markup=keyboards.create_admins_menu_keyboard()
+        )
+
+    @admin_router.callback_query(F.data == "admin_view_admins")
+    async def admin_view_admins(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        try:
+            from shop_bot.data_manager.database import get_admin_ids
+            ids = list(get_admin_ids() or [])
+        except Exception:
+            ids = []
+        if not ids:
+            text = "📋 Список администраторов пуст."
+        else:
+            lines = []
+            for aid in ids:
+                try:
+                    u = get_user(int(aid)) or {}
+                except Exception:
+                    u = {}
+                uname = (u.get('username') or '').strip()
+                if uname:
+                    uname_clean = uname.lstrip('@')
+                    tag = f"<a href='https://t.me/{uname_clean}'>@{uname_clean}</a>"
+                else:
+                    tag = f"<a href='tg://user?id={aid}'>Профиль</a>"
+                lines.append(f"• ID: {aid} — {tag}")
+            text = "📋 <b>Администраторы</b>:\n" + "\n".join(lines)
+        # Кнопки назад
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⬅️ Назад", callback_data="admin_admins_menu")
+        kb.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+        kb.adjust(1, 1)
+        try:
+            await callback.message.edit_text(text, reply_markup=kb.as_markup())
+        except Exception:
+            await callback.message.answer(text, reply_markup=kb.as_markup())
+
     @admin_router.callback_query(F.data.startswith("admin_unban_user_"))
     async def admin_unban_user(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
