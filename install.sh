@@ -51,11 +51,15 @@ if [ -f "$NGINX_CONF_FILE" ]; then
         echo -e "\n${CYAN}Сборка образа лёгкого агента speedtest...${NC}"
         sudo docker build -t shopbot-speedtest-agent ./agent || { echo -e "${RED}Не удалось собрать агент.${NC}"; exit 1; }
         AG_TOKEN=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 36)
+        mkdir -p ./agent
+        echo -n "$AG_TOKEN" > ./agent/AGENT_TOKEN.txt
         echo -e "${GREEN}✔ Агент собран. Пример запуска на удалённом хосте:${NC}"
         echo -e "docker run -d --name speedtest-agent -p 8080:8080 -e AGENT_TOKEN='${AG_TOKEN}' --restart unless-stopped shopbot-speedtest-agent"
         echo -e "\n${YELLOW}В панели на странице Настройки → Хосты для каждого хоста укажите:${NC}"
         echo -e "  - Agent URL: http://IP_ХОСТА:8080"
         echo -e "  - Agent Token: ${AG_TOKEN}"
+        echo -e "\n${CYAN}Токен также сохранён в файл:${NC} ${YELLOW}./agent/AGENT_TOKEN.txt${NC}"
+        echo -e "${CYAN}Скопируйте его и вставьте в панель.${NC}"
         echo -e "После запуска агента нажмите 'Измерить скорость' в карточке хоста."
     else
         echo -e "${GREEN}Выбран локальный клиент speedtest (внутри панели).${NC}"
@@ -196,11 +200,15 @@ if [ "$SPEEDTEST_CHOICE" = "2" ]; then
     echo -e "\n${CYAN}Сборка образа лёгкого агента speedtest...${NC}"
     sudo docker build -t shopbot-speedtest-agent ./agent || { echo -e "${RED}Не удалось собрать агент.${NC}"; exit 1; }
     AG_TOKEN=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 36)
+    mkdir -p ./agent
+    echo -n "$AG_TOKEN" > ./agent/AGENT_TOKEN.txt
     echo -e "${GREEN}✔ Агент собран. Пример запуска на удалённом хосте:${NC}"
     echo -e "docker run -d --name speedtest-agent -p 8080:8080 -e AGENT_TOKEN='${AG_TOKEN}' --restart unless-stopped shopbot-speedtest-agent"
     echo -e "\n${YELLOW}В панели на странице Настройки → Хосты для каждого хоста укажите:${NC}"
     echo -e "  - Agent URL: http://IP_ХОСТА:8080"
     echo -e "  - Agent Token: ${AG_TOKEN}"
+    echo -e "\n${CYAN}Токен также сохранён в файл:${NC} ${YELLOW}./agent/AGENT_TOKEN.txt${NC}"
+    echo -e "${CYAN}Скопируйте его и вставьте в панель.${NC}"
     echo -e "После запуска агента нажмите 'Измерить скорость' в карточке хоста."
 else
     echo -e "${GREEN}Выбран локальный клиент speedtest (внутри панели).${NC}"
