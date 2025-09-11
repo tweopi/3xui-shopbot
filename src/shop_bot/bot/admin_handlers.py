@@ -54,6 +54,23 @@ class Broadcast(StatesGroup):
 def get_admin_router() -> Router:
     admin_router = Router()
 
+    # Helper: форматирование упоминания пользователя (инициатора)
+    def _format_user_mention(u: types.User) -> str:
+        try:
+            if u.username:
+                uname = u.username.lstrip('@')
+                return f"@{uname}"
+            # Fallback: кликабельная ссылка по ID с читаемым именем
+            full_name = (u.full_name or u.first_name or "Администратор").strip()
+            # html_escape — это модуль, импортированный как html; у него есть .escape
+            try:
+                safe_name = html_escape.escape(full_name)
+            except Exception:
+                safe_name = full_name
+            return f"<a href='tg://user?id={u.id}'>{safe_name}</a>"
+        except Exception:
+            return str(getattr(u, 'id', '—'))
+
     async def show_admin_menu(message: types.Message, edit_message: bool = False):
         # Собираем статистику для отображения прямо в админ-меню
         stats = get_admin_stats() or {}
@@ -126,7 +143,8 @@ def get_admin_router() -> Router:
             admin_ids = list({*(get_admin_ids() or []), int(callback.from_user.id)})
         except Exception:
             admin_ids = [int(callback.from_user.id)]
-        start_text = f"🚀 Запущен тест скорости для хоста: <b>{host_name}</b> (инициатор: {callback.from_user.id})"
+        initiator = _format_user_mention(callback.from_user)
+        start_text = f"🚀 Запущен тест скорости для хоста: <b>{host_name}</b>\n(инициатор: {initiator})"
         for aid in admin_ids:
             try:
                 await callback.bot.send_message(aid, start_text)
@@ -208,9 +226,11 @@ def get_admin_router() -> Router:
             admin_ids = list({*(get_admin_ids() or []), int(callback.from_user.id)})
         except Exception:
             admin_ids = [int(callback.from_user.id)]
+        initiator = _format_user_mention(callback.from_user)
+        start_text = f"🚀 Запущен тест скорости для всех хостов\n(инициатор: {initiator})"
         for aid in admin_ids:
             try:
-                await callback.bot.send_message(aid, "🚀 Запущен тест скорости для всех хостов")
+                await callback.bot.send_message(aid, start_text)
             except Exception:
                 pass
         # пробежимся по хостам
@@ -230,6 +250,9 @@ def get_admin_router() -> Router:
         text = "🏁 Тест для всех завершён:\n" + "\n".join(summary_lines)
         await callback.message.answer(text)
         for aid in admin_ids:
+            # Не дублируем результат инициатору/в текущий чат
+            if aid == callback.from_user.id or aid == callback.message.chat.id:
+                continue
             try:
                 await callback.bot.send_message(aid, text)
             except Exception:
