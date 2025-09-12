@@ -118,7 +118,7 @@ curl -sSL https://raw.githubusercontent.com/tweopi/3xui-shopbot/main/install.sh 
 
 3) Следуйте инструкциям установщика:
 
-- Введите домен (например, `vpn-shop.example.com`).
+- Введите домен (например, `shop.example.com`).
 - Укажите email для SSL (Let's Encrypt).
 - Скрипт автоматически поднимет контейнеры и выпишет сертификат.
 
