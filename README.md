@@ -40,15 +40,6 @@
 ## 🖼️ Скриншоты
 
 
-- Панель: `docs/screenshots/dashboard.png`
-- Настройки: `docs/screenshots/settings.png`
-- Рефералы: `docs/screenshots/referrals.png`
-- Спидтесты: `docs/screenshots/speedtests.png`
-- Бот — главное меню: `docs/screenshots/bot-main-menu.png`
-- Бот — админ-меню: `docs/screenshots/bot-admin-menu.png`
-- Бот — настройки/помощь: `docs/screenshots/bot-settings.png`
-
-Примеры встраивания:
 
 ![Dashboard](docs/screenshots/dashboard.png)
 ![Settings](docs/screenshots/settings.png)
@@ -58,8 +49,6 @@
 ![Bot Main Menu](docs/screenshots/bot-main-menu.png)
 ![Bot Admin Menu](docs/screenshots/bot-admin-menu.png)
 ![Bot Settings](docs/screenshots/bot-settings.png)
-
-> Если файлы отсутствуют — GitHub просто не отобразит изображение. Загрузите их по указанным путям.
 
 ---
 
