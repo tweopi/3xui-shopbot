@@ -170,20 +170,18 @@ docker-compose down && docker-compose up
   <img alt="done" src="https://img.shields.io/badge/статус-done-brightgreen?style=flat-square">
 </p>
 
-### Вехи и прогресс
+### Вехи
 
-<p>
-  <img alt="M1" src="https://img.shields.io/badge/M1_Аналитика-0%2F4-yellow?style=flat-square"> 
-  <img alt="M2" src="https://img.shields.io/badge/M2_Платежи-0%2F4-lightgrey?style=flat-square"> 
-  <img alt="M3" src="https://img.shields.io/badge/M3_Маркетинг-0%2F3-lightgrey?style=flat-square"> 
-  <img alt="M4" src="https://img.shields.io/badge/M4_Локализация-0%2F2-lightgrey?style=flat-square"> 
-  <img alt="M5" src="https://img.shields.io/badge/M5_Тестовый_период-0%2F2-lightgrey?style=flat-square"> 
-  <img alt="M6" src="https://img.shields.io/badge/M6_Интеграции-0%2F3-lightgrey?style=flat-square"> 
-  <img alt="M7" src="https://img.shields.io/badge/M7_Бэкапы-0%2F2-lightgrey?style=flat-square">
-</p>
+- M1 — Аналитика и UX панели (Tabler)
+- M2 — Платежи и биллинг
+- M3 — Маркетинг и рост
+- M4 — Локализация и мультивалютность
+- M5 — Тестовый период и контроль качества
+- M6 — Интеграции и вебхуки
+- M7 — Резервные копии и восстановление
 
 <details>
-  <summary>📊 <b>M1 — Аналитика и UX панели (Tabler)</b> <img src="https://img.shields.io/badge/статус-in%20progress-yellow?style=flat-square"/></summary>
+  <summary><b>M1 — Аналитика и UX панели (Tabler)</b> <img src="https://img.shields.io/badge/статус-in%20progress-yellow?style=flat-square"/></summary>
 
 - [ ] Дашборды продаж/платежей (Tabler Cards, ApexCharts)
 - [ ] Метрики по активностям пользователей (новые/возвраты, конверсия)
@@ -193,7 +191,7 @@ docker-compose down && docker-compose up
 </details>
 
 <details>
-  <summary>💳 <b>M2 — Платежи и биллинг</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
+  <summary><b>M2 — Платежи и биллинг</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
 
 - [ ] Поддержка Tinkoff
 - [ ] Поддержка PayPal
@@ -203,7 +201,7 @@ docker-compose down && docker-compose up
 </details>
 
 <details>
-  <summary>🚀 <b>M3 — Маркетинг и рост</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
+  <summary><b>M3 — Маркетинг и рост</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
 
 - [ ] Купоны/промокоды (фикс/процент, срок действия, лимиты)
 - [ ] Реферальная программа (личные ссылки, вознаграждения)
@@ -212,7 +210,7 @@ docker-compose down && docker-compose up
 </details>
 
 <details>
-  <summary>🌐 <b>M4 — Локализация и мультивалютность</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
+  <summary><b>M4 — Локализация и мультивалютность</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
 
 - [ ] RU/EN локализация для панели и бота
 - [ ] Мультивалютность (RUB, USD, EUR, USDT) с авто-конвертацией
@@ -220,7 +218,7 @@ docker-compose down && docker-compose up
 </details>
 
 <details>
-  <summary>🧪 <b>M5 — Тестовый период и контроль качества</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
+  <summary><b>M5 — Тестовый период и контроль качества</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
 
 - [ ] Гибкие тестовые периоды: лимит трафика/скорости/устройств
 - [ ] Авто-удаление/откат тестовых доступов по событиям/таймерам
@@ -228,7 +226,7 @@ docker-compose down && docker-compose up
 </details>
 
 <details>
-  <summary>🔗 <b>M6 — Интеграции и вебхуки</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
+  <summary><b>M6 — Интеграции и вебхуки</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
 
 - [ ] Расширенные вебхуки (события платежей, создание/отзыв ключей)
 - [ ] Интеграции с CRM/таблицами (Notion, Airtable, Google Sheets)
@@ -237,7 +235,7 @@ docker-compose down && docker-compose up
 </details>
 
 <details>
-  <summary>🗄️ <b>M7 — Резервные копии и восстановление</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
+  <summary><b>M7 — Резервные копии и восстановление</b> <img src="https://img.shields.io/badge/статус-planned-lightgrey?style=flat-square"/></summary>
 
 - [ ] Бэкап конфигураций хостов/тарифов/настроек
 - [ ] Восстановление из бэкапа в один клик
@@ -245,27 +243,6 @@ docker-compose down && docker-compose up
 </details>
 
 Идеи и голосование — в Issues. Пишите ваши хотелки: самые востребованные задачи поднимаем в приоритет.
-
-### Как отмечать прогресс
-
-1) Отмечайте выполненные пункты чекбоксами:
-
-   - Меняйте `- [ ]` на `- [x]` у выполненной задачи.
-
-2) Обновляйте бейдж статуса в заголовке вехи:
-
-   - planned → in progress → done.
-   - Просто замените слово в ссылке на бейдж: `.../badge/статус-in%20progress-...` → `.../badge/статус-done-...`.
-
-3) Обновляйте прогресс-бейдж под заголовком «Вехи и прогресс»:
-
-   - Например, для M1 после выполнения 2 из 4 задач замените `0%2F4` на `2%2F4`.
-
-4) Связывайте задачи с Issues/PR:
-
-   - Добавьте ссылку в пункт: `[#123]` или `[Issue #123](https://github.com/tweopi/3xui-shopbot/issues/123)`.
-
-5) Опционально — отмечайте даты релизов/завершения в скобках.
 
 ## 🙌 Баги и предложения
 
