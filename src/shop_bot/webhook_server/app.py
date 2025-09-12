@@ -15,6 +15,7 @@ from flask import Flask, request, render_template, redirect, url_for, flash, ses
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 import secrets
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from shop_bot.modules import xui_api
@@ -67,16 +68,15 @@ def create_webhook_app(bot_controller_instance):
     template_dir = os.path.join(app_dir, 'templates')
     template_file = os.path.join(template_dir, 'login.html')
 
-    # Diagnostic info (debug only)
-    logger.debug("--- DIAGNOSTIC INFORMATION ---")
-    logger.debug(f"Current Working Directory: {os.getcwd()}")
-    logger.debug(f"Path of running app.py: {app_file_path}")
-    logger.debug(f"Directory of running app.py: {app_dir}")
-    logger.debug(f"Expected templates directory: {template_dir}")
-    logger.debug(f"Expected login.html path: {template_file}")
-    logger.debug(f"Does template directory exist? -> {os.path.isdir(template_dir)}")
-    logger.debug(f"Does login.html file exist? -> {os.path.isfile(template_file)}")
-    logger.debug("--- END DIAGNOSTIC INFORMATION ---")
+    print("--- DIAGNOSTIC INFORMATION ---", flush=True)
+    print(f"Current Working Directory: {os.getcwd()}", flush=True)
+    print(f"Path of running app.py: {app_file_path}", flush=True)
+    print(f"Directory of running app.py: {app_dir}", flush=True)
+    print(f"Expected templates directory: {template_dir}", flush=True)
+    print(f"Expected login.html path: {template_file}", flush=True)
+    print(f"Does template directory exist? -> {os.path.isdir(template_dir)}", flush=True)
+    print(f"Does login.html file exist? -> {os.path.isfile(template_file)}", flush=True)
+    print("--- END DIAGNOSTIC INFORMATION ---", flush=True)
     
     flask_app = Flask(
         __name__,

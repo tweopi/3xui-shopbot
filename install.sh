@@ -4,53 +4,6 @@ CYAN='\033[0;36m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-print_banner() {
-    echo -e "${CYAN}"
-    echo -e "  ______   __  __  _    _  ___       ____  _           _           _   "
-    echo -e " |___  /  |  \/  || |  | |/ _ \     / ___|| |__   ___ | |__   ___ | |_ "
-    echo -e "    / /   | |\/| || |  | | | | |____\\___ \| '_ \ / _ \| '_ \ / _ \| __|"
-    echo -e "   / /__  | |  | || |__| | |_| |_____|__) | | | | (_) | |_) | (_) | |_ "
-    echo -e "  /_____\ |_|  |_| \____/ \___/     |____/|_| |_|\___/|_.__/ \___/ \__|"
-    echo -e ""
-    echo -e "            3xui-ShopBot — установка и обновление"
-    echo -e "${NC}"
-}
-
-spinner() {
-    local pid=$1
-    local msg="$2"
-    local sp='|/-\\'
-    local i=0
-    local use_tty=1
-    if [ ! -t 1 ]; then use_tty=0; fi
-    if [ $use_tty -eq 1 ]; then tput civis 2>/dev/null || true; fi
-    while kill -0 $pid 2>/dev/null; do
-        if [ $use_tty -eq 1 ]; then
-            printf "\r${CYAN}%s ${NC}%s" "$msg" "${sp:i++%4:1}"
-        fi
-        sleep 0.1
-    done
-    wait $pid
-    local status=$?
-    if [ $use_tty -eq 1 ]; then
-        tput cnorm 2>/dev/null || true
-        if [ $status -eq 0 ]; then
-            printf "\r${GREEN}✔ %s${NC}\n" "$msg"
-        else
-            printf "\r${RED}✖ %s (ошибка)${NC}\n" "$msg"
-        fi
-    fi
-    return $status
-}
-
-run_with_spinner() {
-    # usage: run_with_spinner "command" "Message"
-    bash -c "$1" &
-    local pid=$!
-    spinner $pid "$2"
-    wait $pid
-}
-
 handle_error() {
     echo -e "\n${RED}Ошибка на строке $1. Установка прервана.${NC}"
     exit 1
@@ -70,7 +23,6 @@ REPO_URL="https://github.com/tweopi/3xui-shopbot.git"
 PROJECT_DIR="3xui-shopbot"
 NGINX_CONF_FILE="/etc/nginx/sites-available/${PROJECT_DIR}.conf"
 
-print_banner
 echo -e "${GREEN}--- Запуск скрипта установки/обновления 3xui-ShopBot ---${NC}"
 
 if [ -f "$NGINX_CONF_FILE" ]; then
@@ -86,11 +38,11 @@ if [ -f "$NGINX_CONF_FILE" ]; then
     cd $PROJECT_DIR
 
     echo -e "\n${CYAN}Шаг 1: Обновление кода из репозитория Git...${NC}"
-    run_with_spinner "git pull" "Обновление кода из репозитория"
+    git pull
+    echo -e "${GREEN}✔ Код успешно обновлен.${NC}"
 
     echo -e "\n${CYAN}Шаг 2: Пересборка и перезапуск Docker-контейнеров...${NC}"
-    sudo docker-compose down --remove-orphans || true
-    run_with_spinner "sudo docker-compose up -d --build" "Сборка и запуск Docker-контейнеров"
+    sudo docker-compose down --remove-orphans && sudo docker-compose up -d --build
     
     echo -e "\n\n${GREEN}==============================================${NC}"
     echo -e "${GREEN}      🎉 Обновление успешно завершено! 🎉      ${NC}"
@@ -131,7 +83,7 @@ echo -e "${GREEN}✔ Все системные зависимости устан
 
 echo -e "\n${CYAN}Шаг 2: Клонирование репозитория...${NC}"
 if [ ! -d "$PROJECT_DIR" ]; then
-    run_with_spinner "git clone $REPO_URL" "Клонирование репозитория"
+    git clone $REPO_URL
 fi
 cd $PROJECT_DIR
 echo -e "${GREEN}✔ Репозиторий готов.${NC}"
@@ -173,7 +125,7 @@ if [ -d "/etc/letsencrypt/live/$DOMAIN" ]; then
     echo -e "${GREEN}✔ SSL-сертификаты для домена $DOMAIN уже существуют.${NC}"
 else
     echo -e "${YELLOW}Получаем SSL-сертификаты для $DOMAIN...${NC}"
-    run_with_spinner "sudo certbot --nginx -d $DOMAIN --email $EMAIL --agree-tos --non-interactive --redirect" "Получение SSL-сертификатов"
+    sudo certbot --nginx -d $DOMAIN --email $EMAIL --agree-tos --non-interactive --redirect
     echo -e "${GREEN}✔ SSL-сертификаты успешно получены.${NC}"
 fi
 
@@ -216,9 +168,9 @@ sudo nginx -t && sudo systemctl reload nginx
 
 echo -e "\n${CYAN}Шаг 5: Сборка и запуск Docker-контейнера...${NC}"
 if [ "$(sudo docker-compose ps -q)" ]; then
-    sudo docker-compose down || true
+    sudo docker-compose down
 fi
-run_with_spinner "sudo docker-compose up -d --build" "Сборка и запуск Docker-контейнера"
+sudo docker-compose up -d --build
 
 echo -e "\n\n${GREEN}=====================================================${NC}"
 echo -e "${GREEN}      🎉 Установка и запуск успешно завершены! 🎉      ${NC}"

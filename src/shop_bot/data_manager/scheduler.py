@@ -60,16 +60,16 @@ async def send_subscription_notification(bot: Bot, user_id: int, key_id: int, ti
         builder.adjust(2)
         
         await bot.send_message(chat_id=user_id, text=message, reply_markup=builder.as_markup(), parse_mode='Markdown')
-        logger.info(f"Отправлено уведомление о подписке пользователю {user_id} по ключу {key_id} (осталось {time_left_hours} ч).")
+        logger.info(f"Sent subscription notification to user {user_id} for key {key_id} ({time_left_hours} hours left).")
         
     except Exception as e:
-        logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
+        logger.error(f"Error sending subscription notification to user {user_id}: {e}")
 
 def _cleanup_notified_users(all_db_keys: list[dict]):
     if not notified_users:
         return
 
-    logger.debug("Планировщик: очистка кэша уведомлений...")
+    logger.info("Scheduler: Cleaning up the notification cache...")
     
     active_key_ids = {key['key_id'] for key in all_db_keys}
     
@@ -90,10 +90,10 @@ def _cleanup_notified_users(all_db_keys: list[dict]):
             cleaned_users += 1
     
     if cleaned_users > 0 or cleaned_keys > 0:
-        logger.debug(f"Планировщик: очистка завершена. Удалено записей пользователей: {cleaned_users}, ключей: {cleaned_keys}.")
+        logger.info(f"Scheduler: Cleanup complete. Removed {cleaned_users} user entries and {cleaned_keys} key entries from the cache.")
 
 async def check_expiring_subscriptions(bot: Bot):
-    logger.debug("Планировщик: проверка истекающих подписок...")
+    logger.info("Scheduler: Checking for expiring subscriptions...")
     current_time = datetime.now()
     all_keys = database.get_all_keys()
     
@@ -121,20 +121,20 @@ async def check_expiring_subscriptions(bot: Bot):
                     break 
                     
         except Exception as e:
-            logger.error(f"Ошибка обработки срока истечения для ключа {key.get('key_id')}: {e}")
+            logger.error(f"Error processing expiry for key {key.get('key_id')}: {e}")
 
 async def sync_keys_with_panels():
-    logger.debug("Планировщик: начало синхронизации с панелями XUI...")
+    logger.info("Scheduler: Starting sync with XUI panels...")
     total_affected_records = 0
     
     all_hosts = database.get_all_hosts()
     if not all_hosts:
-        logger.debug("Планировщик: в базе не настроены хосты. Синхронизация пропущена.")
+        logger.info("Scheduler: No hosts configured in the database. Sync skipped.")
         return
 
     for host in all_hosts:
         host_name = host['host_name']
-        logger.debug(f"Планировщик: обработка хоста: '{host_name}'")
+        logger.info(f"Scheduler: Processing host: '{host_name}'")
         
         try:
             api, inbound = xui_api.login_to_host(
@@ -145,12 +145,12 @@ async def sync_keys_with_panels():
             )
 
             if not api or not inbound:
-                logger.error(f"Планировщик: не удалось авторизоваться на хосте '{host_name}'. Пропускаем хост.")
+                logger.error(f"Scheduler: Could not log in to host '{host_name}'. Skipping this host.")
                 continue
             
             full_inbound_details = api.inbound.get_by_id(inbound.id)
             clients_on_server = {client.email: client for client in (full_inbound_details.settings.clients or [])}
-            logger.debug(f"Планировщик: на панели '{host_name}' найдено клиентов: {len(clients_on_server)}.")
+            logger.info(f"Scheduler: Found {len(clients_on_server)} clients on the '{host_name}' panel.")
 
             keys_in_db = database.get_keys_for_host(host_name)
             
@@ -159,17 +159,17 @@ async def sync_keys_with_panels():
                 expiry_date = datetime.fromisoformat(db_key['expiry_date'])
                 now = datetime.now()
                 if expiry_date < now - timedelta(days=5):
-                    logger.debug(f"Планировщик: ключ '{key_email}' истёк более 5 дней назад. Удаляем с панели и из БД.")
+                    logger.info(f"Scheduler: Key '{key_email}' expired more than 5 days ago. Deleting from panel and DB.")
                     try:
                         await xui_api.delete_client_on_host(host_name, key_email)
                     except Exception as e:
-                        logger.error(f"Планировщик: не удалось удалить клиента '{key_email}' с панели: {e}")
+                        logger.error(f"Scheduler: Failed to delete client '{key_email}' from panel: {e}")
                     deleted = database.delete_key_by_email(key_email)
                     if deleted:
                         total_affected_records += 1
-                        logger.debug(f"Планировщик: ключ '{key_email}' удалён из локальной БД после очистки панели.")
+                        logger.info(f"Scheduler: Deleted key '{key_email}' from local DB after panel cleanup.")
                     else:
-                        logger.warning(f"Планировщик: попытка удалить ключ '{key_email}' из локальной БД не затронула записи.")
+                        logger.warning(f"Scheduler: Tried to delete key '{key_email}' from local DB, but no records were affected.")
                     continue
 
                 server_client = clients_on_server.pop(key_email, None)
@@ -183,9 +183,9 @@ async def sync_keys_with_panels():
                     if abs(server_expiry_ms - local_expiry_ms) > 1000:
                         database.update_key_status_from_server(key_email, server_client)
                         total_affected_records += 1
-                        logger.debug(f"Планировщик: синхронизирован (обновлён) ключ '{key_email}' для хоста '{host_name}'.")
+                        logger.info(f"Scheduler: Synced (updated) key '{key_email}' for host '{host_name}'.")
                 else:
-                    logger.warning(f"Планировщик: ключ '{key_email}' для хоста '{host_name}' не найден на сервере. Удаляем из локальной БД.")
+                    logger.warning(f"Scheduler: Key '{key_email}' for host '{host_name}' not found on server. Deleting from local DB.")
                     database.update_key_status_from_server(key_email, None)
                     total_affected_records += 1
 
@@ -199,7 +199,7 @@ async def sync_keys_with_panels():
                         user_id = int(m.group(1)) if m else None
                         if not user_id:
                             logger.warning(
-                                f"Планировщик: найден осиротевший клиент '{orphan_email}' на хосте '{host_name}', не удалось определить user_id; оставляем как есть."
+                                f"Scheduler: Found orphan client '{orphan_email}' on host '{host_name}' but cannot infer user_id; leaving as is."
                             )
                             continue
 
@@ -207,7 +207,7 @@ async def sync_keys_with_panels():
                         usr = database.get_user(user_id)
                         if not usr:
                             logger.warning(
-                                f"Планировщик: осиротевший клиент '{orphan_email}' предполагает user_id={user_id}, но пользователь не найден; оставляем как есть."
+                                f"Scheduler: Orphan client '{orphan_email}' suggests user_id={user_id}, but user not found; leaving as is."
                             )
                             continue
 
@@ -222,7 +222,7 @@ async def sync_keys_with_panels():
 
                         if not client_uuid:
                             logger.warning(
-                                f"Планировщик: у осиротевшего клиента '{orphan_email}' нет UUID/id; привязка невозможна."
+                                f"Scheduler: Orphan client '{orphan_email}' has no UUID/id; cannot attach."
                             )
                             continue
 
@@ -234,27 +234,27 @@ async def sync_keys_with_panels():
                             expiry_timestamp_ms=expiry_ms,
                         )
                         if new_id:
-                            logger.debug(
-                                f"Планировщик: осиротевший клиент '{orphan_email}' на хосте '{host_name}' привязан к пользователю {user_id} как key_id={new_id}."
+                            logger.info(
+                                f"Scheduler: Attached orphan client '{orphan_email}' on host '{host_name}' to user {user_id} as key_id={new_id}."
                             )
                             total_affected_records += 1
                         else:
                             logger.warning(
-                                f"Планировщик: не удалось привязать осиротевшего клиента '{orphan_email}' на хосте '{host_name}'."
+                                f"Scheduler: Failed to attach orphan client '{orphan_email}' on host '{host_name}'."
                             )
                     except Exception as e:
                         logger.error(
-                            f"Планировщик: ошибка при попытке привязать осиротевшего клиента '{orphan_email}' на хосте '{host_name}': {e}",
+                            f"Scheduler: Error while trying to attach orphan client '{orphan_email}' on host '{host_name}': {e}",
                             exc_info=True,
                         )
 
         except Exception as e:
-            logger.error(f"Планировщик: неожиданная ошибка при обработке хоста '{host_name}': {e}", exc_info=True)
+            logger.error(f"Scheduler: An unexpected error occurred while processing host '{host_name}': {e}", exc_info=True)
             
-    logger.debug(f"Планировщик: синхронизация с XUI завершена. Изменено записей: {total_affected_records}.")
+    logger.info(f"Scheduler: Sync with XUI panels finished. Total records affected: {total_affected_records}.")
 
 async def periodic_subscription_check(bot_controller: BotController):
-    logger.info("Планировщик запущен.")
+    logger.info("Scheduler has been started.")
     await asyncio.sleep(10)
 
     while True:
@@ -274,14 +274,14 @@ async def periodic_subscription_check(bot_controller: BotController):
                 if bot:
                     await check_expiring_subscriptions(bot)
                 else:
-                    logger.warning("Планировщик: бот помечен как запущенный, но экземпляр недоступен.")
+                    logger.warning("Scheduler: Bot is marked as running, but instance is not available.")
             else:
-                logger.debug("Планировщик: бот остановлен, пропускаем уведомления пользователям.")
+                logger.info("Scheduler: Bot is stopped, skipping user notifications.")
 
         except Exception as e:
-            logger.error(f"Планировщик: необработанная ошибка в основном цикле: {e}", exc_info=True)
+            logger.error(f"Scheduler: An unhandled error occurred in the main loop: {e}", exc_info=True)
             
-        logger.info(f"Планировщик: цикл завершён. Следующая проверка через {CHECK_INTERVAL_SECONDS} секунд.")
+        logger.info(f"Scheduler: Cycle finished. Next check in {CHECK_INTERVAL_SECONDS} seconds.")
         await asyncio.sleep(CHECK_INTERVAL_SECONDS)
 
 async def _maybe_run_periodic_speedtests():
@@ -293,20 +293,20 @@ async def _maybe_run_periodic_speedtests():
         await _run_speedtests_for_all_hosts()
         _last_speedtests_run_at = now
     except Exception as e:
-        logger.error(f"Планировщик: ошибка запуска спидтестов: {e}", exc_info=True)
+        logger.error(f"Scheduler: speedtests run failed: {e}", exc_info=True)
 
 async def _run_speedtests_for_all_hosts():
     hosts = database.get_all_hosts()
     if not hosts:
-        logger.debug("Планировщик: нет хостов для спидтеста.")
+        logger.info("Scheduler: No hosts to speedtest.")
         return
-    logger.info(f"Планировщик: запуск спидтестов для {len(hosts)} хоста(ов)...")
+    logger.info(f"Scheduler: Running speedtests for {len(hosts)} host(s)...")
     for h in hosts:
         host_name = h.get('host_name')
         if not host_name:
             continue
         try:
-            logger.info(f"Планировщик: спидтест для хоста '{host_name}' начат...")
+            logger.info(f"Scheduler: Speedtest for host '{host_name}' started...")
             # Ограничим каждый хост таймаутом, чтобы не зависнуть надолго
             try:
                 async with asyncio.timeout(180):
@@ -317,13 +317,13 @@ async def _run_speedtests_for_all_hosts():
             ok = res.get('ok')
             err = res.get('error')
             if ok:
-                logger.info(f"Планировщик: спидтест для '{host_name}' завершён успешно")
+                logger.info(f"Scheduler: Speedtest for '{host_name}' finished OK")
             else:
-                logger.warning(f"Планировщик: спидтест для '{host_name}' завершён с ошибками: {err}")
+                logger.warning(f"Scheduler: Speedtest for '{host_name}' finished with errors: {err}")
         except asyncio.TimeoutError:
-            logger.warning(f"Планировщик: таймаут спидтеста для хоста '{host_name}'")
+            logger.warning(f"Scheduler: Speedtest timeout for host '{host_name}'")
         except Exception as e:
-            logger.error(f"Планировщик: сбой спидтеста для хоста '{host_name}': {e}", exc_info=True)
+            logger.error(f"Scheduler: Speedtest failed for host '{host_name}': {e}", exc_info=True)
 
 async def _maybe_run_daily_backup(bot: Bot):
     global _last_backup_run_at
@@ -344,13 +344,13 @@ async def _maybe_run_daily_backup(bot: Bot):
         if zip_path and zip_path.exists():
             try:
                 sent = await backup_manager.send_backup_to_admins(bot, zip_path)
-                logger.info(f"Планировщик: создан бэкап {zip_path.name}, отправлено {sent} админам")
+                logger.info(f"Scheduler: backup created {zip_path.name}, sent to {sent} admins")
             except Exception as e:
-                logger.error(f"Планировщик: не удалось отправить бэкап: {e}")
+                logger.error(f"Scheduler: failed to send backup: {e}")
             try:
                 backup_manager.cleanup_old_backups(keep=7)
             except Exception:
                 pass
         _last_backup_run_at = now
     except Exception as e:
-        logger.error(f"Планировщик: ошибка запуска бэкапа: {e}", exc_info=True)
+        logger.error(f"Scheduler: backup run failed: {e}", exc_info=True)
