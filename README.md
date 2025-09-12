@@ -39,16 +39,54 @@
 
 ## 🖼️ Скриншоты
 
-
-
-![Dashboard](docs/screenshots/dashboard.png)
-![Settings](docs/screenshots/settings.png)
-![Referrals](docs/screenshots/referrals.png)
-![Speedtests](docs/screenshots/speedtests.png)
+<details>
+  <summary><b>Показать скриншоты (компактно)</b></summary>
   
-![Bot Main Menu](docs/screenshots/bot-main-menu.png)
-![Bot Admin Menu](docs/screenshots/bot-admin-menu.png)
-![Bot Settings](docs/screenshots/bot-settings.png)
+  <br>
+  
+  <table>
+    <tr>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" width="480" alt="Dashboard"/></a><br>
+        <sub>Панель — Дашборд</sub>
+      </td>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" width="480" alt="Settings"/></a><br>
+        <sub>Панель — Настройки</sub>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/referrals.png"><img src="docs/screenshots/referrals.png" width="480" alt="Referrals"/></a><br>
+        <sub>Рефералы</sub>
+      </td>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/speedtests.png"><img src="docs/screenshots/speedtests.png" width="480" alt="Speedtests"/></a><br>
+        <sub>Спидтесты</sub>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/bot-main-menu.png"><img src="docs/screenshots/bot-main-menu.png" width="360" alt="Bot Main Menu"/></a><br>
+        <sub>Бот — Главное меню</sub>
+      </td>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/bot-admin-menu.png"><img src="docs/screenshots/bot-admin-menu.png" width="360" alt="Bot Admin Menu"/></a><br>
+        <sub>Бот — Админ‑меню</sub>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/bot-settings.png"><img src="docs/screenshots/bot-settings.png" width="360" alt="Bot Settings"/></a><br>
+        <sub>Бот — Настройки/Помощь</sub>
+      </td>
+      <td></td>
+    </tr>
+  </table>
+ 
+  <br>
+  <i>Клик по миниатюре откроет оригинал в полном размере.</i>
+</details>
 
 ---
 
