@@ -285,12 +285,15 @@
 							/>
 						</div>
 						<div class="form-group password-wrapper">
-							<label for="panel_password"
-								>Новый пароль (оставьте пустым, чтобы не менять):</label
-							>
+							<label for="panel_password">Новый пароль (оставьте пустым, чтобы не менять):</label>
 							<input type="password" id="panel_password" name="panel_password" />
 							<button type="button" class="toggle-password">👁️</button>
 						</div>
+						<div class="mb-3">
+                            <label class="form-label" for="backup_interval_days">Автобэкап базы (каждые N дней)</label>
+                            <input class="form-control pill-md" type="number" min="0" step="1" id="backup_interval_days" name="backup_interval_days" value="{{ settings.backup_interval_days or '1' }}" placeholder="1" />
+                            <div class="form-text">0 — отключить автобэкап. При включении архив БД будет отправляться администраторам и сохраняться в /app/project/backups.</div>
+                        </div>
 					</div>
 				</div>
 			</section>

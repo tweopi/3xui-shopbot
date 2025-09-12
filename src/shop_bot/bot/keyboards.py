@@ -41,10 +41,13 @@ def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🌍 Ключи на хосте", callback_data="admin_host_keys")
     builder.button(text="🎁 Выдать ключ", callback_data="admin_gift_key")
     builder.button(text="⚡ Тест скорости", callback_data="admin_speedtest")
+    builder.button(text="🗄 Бэкап БД", callback_data="admin_backup_db")
+    builder.button(text="♻️ Восстановить БД", callback_data="admin_restore_db")
     builder.button(text="👮 Администраторы", callback_data="admin_admins_menu")
     builder.button(text="📢 Рассылка", callback_data="start_broadcast")
     builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
-    builder.adjust(2, 2, 2, 1)
+    # 4 ряда по 2 кнопки (включая бэкап/восстановление), затем "Назад"
+    builder.adjust(2, 2, 2, 2, 1)
     return builder.as_markup()
 
 def create_admins_menu_keyboard() -> InlineKeyboardMarkup:
