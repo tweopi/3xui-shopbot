@@ -31,7 +31,7 @@ def create_backup_file() -> Path | None:
     """
     try:
         if not DB_FILE.exists():
-            logger.error(f"Backup: DB file not found: {DB_FILE}")
+            logger.error(f"Бэкап: файл БД не найден: {DB_FILE}")
             return None
         ts = _timestamp()
         tmp_db_copy = BACKUPS_DIR / f"users-{ts}.db"
@@ -52,10 +52,10 @@ def create_backup_file() -> Path | None:
         except Exception:
             pass
 
-        logger.info(f"Backup: created {zip_path}")
+        logger.info(f"Бэкап: создан файл {zip_path}")
         return zip_path
     except Exception as e:
-        logger.error(f"Backup: failed to create: {e}", exc_info=True)
+        logger.error(f"Бэкап: не удалось создать архив: {e}", exc_info=True)
         return None
 
 
@@ -69,7 +69,7 @@ def cleanup_old_backups(keep: int = 7) -> None:
             except Exception:
                 pass
     except Exception as e:
-        logger.warning(f"Backup: cleanup failed: {e}")
+        logger.warning(f"Бэкап: не удалось очистить старые архивы: {e}")
 
 
 async def send_backup_to_admins(bot: Bot, zip_path: Path) -> int:
@@ -84,7 +84,7 @@ async def send_backup_to_admins(bot: Bot, zip_path: Path) -> int:
         except Exception:
             admin_ids = []
         if not admin_ids:
-            logger.warning("Backup: no admin ids to send backup to")
+            logger.warning("Бэкап: нет администраторов для отправки архива")
             return 0
         caption = f"🗄 Бэкап БД: {zip_path.name}"
         file = FSInputFile(str(zip_path))
@@ -93,10 +93,10 @@ async def send_backup_to_admins(bot: Bot, zip_path: Path) -> int:
                 await bot.send_document(chat_id=int(uid), document=file, caption=caption)
                 cnt += 1
             except Exception as e:
-                logger.error(f"Backup: failed to send to {uid}: {e}")
+                logger.error(f"Бэкап: не удалось отправить администратору {uid}: {e}")
         return cnt
     except Exception as e:
-        logger.error(f"Backup: send failed: {e}", exc_info=True)
+        logger.error(f"Бэкап: ошибка при рассылке архива: {e}", exc_info=True)
         return cnt
 
 
@@ -115,11 +115,11 @@ def validate_db_file(db_path: Path) -> bool:
             present = {row[0] for row in cur.fetchall()}
             missing = required_tables - present
             if missing:
-                logger.warning(f"Restore: missing tables in uploaded DB: {missing}")
+                logger.warning(f"Восстановление: в загруженной БД отсутствуют таблицы: {missing}")
             # Минимальная проверка: users и bot_settings должны быть
             return 'users' in present and 'bot_settings' in present
     except Exception as e:
-        logger.error(f"Restore: validation error: {e}")
+        logger.error(f"Восстановление: ошибка валидации файла БД: {e}")
         return False
 
 
@@ -130,7 +130,7 @@ def restore_from_file(uploaded_path: Path) -> bool:
     """
     try:
         if not uploaded_path.exists():
-            logger.error(f"Restore: file not found: {uploaded_path}")
+            logger.error(f"Восстановление: файл не найден: {uploaded_path}")
             return False
 
         # Распакуем, если архив
@@ -147,19 +147,19 @@ def restore_from_file(uploaded_path: Path) -> bool:
                             candidate_db = tmp_dir / n
                             break
             except Exception as e:
-                logger.error(f"Restore: zip extract failed: {e}")
+                logger.error(f"Восстановление: не удалось распаковать архив: {e}")
                 return False
         else:
             # Ожидаем, что это .db
             candidate_db = uploaded_path
 
         if not candidate_db or not candidate_db.exists():
-            logger.error("Restore: no .db file found in upload")
+            logger.error("Восстановление: в переданном файле не найдено .db")
             return False
 
         # Валидация
         if not validate_db_file(candidate_db):
-            logger.error("Restore: validation failed")
+            logger.error("Восстановление: файл БД не прошёл проверку")
             return False
 
         # Бэкап текущей БД
@@ -182,8 +182,8 @@ def restore_from_file(uploaded_path: Path) -> bool:
         except Exception:
             pass
 
-        logger.info("Restore: database replaced successfully")
+        logger.info("Восстановление: база данных успешно заменена")
         return True
     except Exception as e:
-        logger.error(f"Restore: failed: {e}", exc_info=True)
+        logger.error(f"Восстановление: ошибка: {e}", exc_info=True)
         return False

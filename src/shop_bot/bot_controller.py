@@ -24,22 +24,22 @@ class BotController:
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
-        logger.info("BotController: Event loop has been set.")
+        logger.info("Цикл событий установлен.")
 
     def get_bot_instance(self) -> Bot | None:
         return self._bot
 
     async def _start_polling(self):
         self._is_running = True
-        logger.info("BotController: Polling task has been started.")
+        logger.info("Запущен опрос Telegram (polling).")
         try:
             await self._dp.start_polling(self._bot)
         except asyncio.CancelledError:
-            logger.info("BotController: Polling task was cancelled.")
+            logger.info("Опрос остановлен (задача отменена).")
         except Exception as e:
-            logger.error(f"BotController: An error occurred during polling: {e}", exc_info=True)
+            logger.error(f"Ошибка во время опроса: {e}", exc_info=True)
         finally:
-            logger.info("BotController: Polling has gracefully stopped.")
+            logger.info("Опрос корректно остановлен.")
             self._is_running = False
             self._task = None
             if self._bot:
@@ -68,7 +68,10 @@ class BotController:
             self._bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
             self._dp = Dispatcher()
             
-            self._dp.update.middleware(BanMiddleware())
+            # Вешаем BanMiddleware на уровни событий, где доступен event_from_user
+            # Вместо уровня update, чтобы корректно отлавливать сообщения/колбэки забаненных пользователей
+            self._dp.message.middleware(BanMiddleware())
+            self._dp.callback_query.middleware(BanMiddleware())
             
             user_router = get_user_router()
             admin_router = get_admin_router()
@@ -84,7 +87,7 @@ class BotController:
             try:
                 asyncio.run_coroutine_threadsafe(self._bot.delete_webhook(drop_pending_updates=True), self._loop)
             except Exception as e:
-                logger.warning(f"BotController: Failed to delete webhook before polling: {e}")
+                logger.warning(f"Не удалось удалить вебхук перед запуском опроса: {e}")
 
             yookassa_shop_id = database.get_setting("yookassa_shop_id")
             yookassa_secret_key = database.get_setting("yookassa_secret_key")
@@ -115,11 +118,11 @@ class BotController:
             handlers.ADMIN_ID = admin_id
 
             self._task = asyncio.run_coroutine_threadsafe(self._start_polling(), self._loop)
-            logger.info("BotController: Start command sent to event loop.")
+            logger.info("Команда на запуск передана в цикл событий.")
             return {"status": "success", "message": "Команда на запуск бота отправлена."}
             
         except Exception as e:
-            logger.error(f"Failed to start bot: {e}", exc_info=True)
+            logger.error(f"Не удалось запустить бота: {e}", exc_info=True)
             self._bot = None
             self._dp = None
             return {"status": "error", "message": f"Ошибка при запуске: {e}"}
@@ -131,7 +134,7 @@ class BotController:
         if not self._loop or not self._dp:
             return {"status": "error", "message": "Критическая ошибка: компоненты бота недоступны."}
 
-        logger.info("BotController: Sending graceful stop signal...")
+        logger.info("Отправляю сигнал на корректную остановку...")
         asyncio.run_coroutine_threadsafe(self._dp.stop_polling(), self._loop)
         
         return {"status": "success", "message": "Команда на остановку бота отправлена."}

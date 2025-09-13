@@ -21,22 +21,22 @@ class SupportBotController:
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
-        logger.info("SupportBotController: Event loop has been set.")
+        logger.info("Цикл событий установлен.")
 
     def get_bot_instance(self) -> Bot | None:
         return self._bot
 
     async def _start_polling(self):
         self._is_running = True
-        logger.info("SupportBotController: Polling task has been started.")
+        logger.info("Запущен опрос Telegram (polling)...")
         try:
             await self._dp.start_polling(self._bot)
         except asyncio.CancelledError:
-            logger.info("SupportBotController: Polling task was cancelled.")
+            logger.info("Опрос остановлен (задача отменена).")
         except Exception as e:
-            logger.error(f"SupportBotController: An error occurred during polling: {e}", exc_info=True)
+            logger.error(f"Ошибка во время опроса: {e}", exc_info=True)
         finally:
-            logger.info("SupportBotController: Polling has gracefully stopped.")
+            logger.info("Опрос корректно остановлен.")
             self._is_running = False
             self._task = None
             if self._bot:
@@ -73,13 +73,13 @@ class SupportBotController:
             try:
                 asyncio.run_coroutine_threadsafe(self._bot.delete_webhook(drop_pending_updates=True), self._loop)
             except Exception as e:
-                logger.warning(f"SupportBotController: Failed to delete webhook before polling: {e}")
+                logger.warning(f"Не удалось удалить вебхук перед запуском опроса: {e}")
 
             self._task = asyncio.run_coroutine_threadsafe(self._start_polling(), self._loop)
-            logger.info("SupportBotController: Start command sent to event loop.")
+            logger.info("Команда на запуск передана в цикл событий.")
             return {"status": "success", "message": "Команда на запуск support-бота отправлена."}
         except Exception as e:
-            logger.error(f"Failed to start support-bot: {e}", exc_info=True)
+            logger.error(f"Ошибка запуска support-бота: {e}", exc_info=True)
             self._bot = None
             self._dp = None
             return {"status": "error", "message": f"Ошибка при запуске support-бота: {e}"}
@@ -91,7 +91,7 @@ class SupportBotController:
         if not self._loop or not self._dp:
             return {"status": "error", "message": "Критическая ошибка: компоненты бота недоступны."}
 
-        logger.info("SupportBotController: Sending graceful stop signal...")
+        logger.info("Отправляю сигнал на корректную остановку...")
         asyncio.run_coroutine_threadsafe(self._dp.stop_polling(), self._loop)
         return {"status": "success", "message": "Команда на остановку support-бота отправлена."}
 

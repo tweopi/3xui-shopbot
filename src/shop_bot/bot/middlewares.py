@@ -1,7 +1,8 @@
 from typing import Callable, Dict, Any, Awaitable
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Chat
-from shop_bot.data_manager.database import get_user
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from shop_bot.data_manager.database import get_user, get_setting
 
 class BanMiddleware(BaseMiddleware):
     async def __call__(
@@ -16,11 +17,51 @@ class BanMiddleware(BaseMiddleware):
 
         user_data = get_user(user.id)
         if user_data and user_data.get('is_banned'):
-            ban_message_text = "Вы заблокированы и не можете использовать этого бота."
+            ban_message_text = "🚫 Вы заблокированы и не можете использовать этого бота."
+            # Соберём клавиатуру поддержки без кнопки "Назад в меню"
+            try:
+                support = (get_setting("support_bot_username") or get_setting("support_user") or "").strip()
+            except Exception:
+                support = ""
+            kb_builder = InlineKeyboardBuilder()
+            url: str | None = None
+            if support:
+                if support.startswith("@"):  # @username
+                    url = f"tg://resolve?domain={support[1:]}"
+                elif support.startswith("tg://"):
+                    url = support
+                elif support.startswith("http://") or support.startswith("https://"):
+                    try:
+                        part = support.split("/")[-1].split("?")[0]
+                        if part:
+                            url = f"tg://resolve?domain={part}"
+                    except Exception:
+                        url = support
+                else:
+                    url = f"tg://resolve?domain={support}"
+            if url:
+                kb_builder.button(text="🆘 Написать в поддержку", url=url)
+            else:
+                kb_builder.button(text="🆘 Поддержка", callback_data="show_help")
+            ban_kb = kb_builder.as_markup()
+
             if isinstance(event, CallbackQuery):
+                # Показать алерт и дополнительно отправить сообщение с кнопкой поддержки
                 await event.answer(ban_message_text, show_alert=True)
+                try:
+                    await event.bot.send_message(
+                        chat_id=event.from_user.id,
+                        text=ban_message_text,
+                        reply_markup=ban_kb
+                    )
+                except Exception:
+                    pass
             elif isinstance(event, Message):
-                await event.answer(ban_message_text)
+                try:
+                    await event.answer(ban_message_text, reply_markup=ban_kb)
+                except Exception:
+                    # Фолбэк без клавиатуры
+                    await event.answer(ban_message_text)
             return
         
         return await handler(event, data)

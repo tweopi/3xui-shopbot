@@ -449,10 +449,33 @@ def get_admin_router() -> Router:
             ban_user(user_id)
             await callback.message.answer(f"🚫 Пользователь {user_id} забанен")
             try:
+                # Уведомление пользователю: только кнопка поддержки, без "Назад в меню"
+                from shop_bot.data_manager.database import get_setting as _get_setting
+                support = (_get_setting("support_bot_username") or _get_setting("support_user") or "").strip()
+                kb = InlineKeyboardBuilder()
+                url = None
+                if support:
+                    if support.startswith("@"):  # @username
+                        url = f"tg://resolve?domain={support[1:]}"
+                    elif support.startswith("tg://"):
+                        url = support
+                    elif support.startswith("http://") or support.startswith("https://"):
+                        try:
+                            part = support.split("/")[-1].split("?")[0]
+                            if part:
+                                url = f"tg://resolve?domain={part}"
+                        except Exception:
+                            url = support
+                    else:
+                        url = f"tg://resolve?domain={support}"
+                if url:
+                    kb.button(text="🆘 Написать в поддержку", url=url)
+                else:
+                    kb.button(text="🆘 Поддержка", callback_data="show_help")
                 await callback.bot.send_message(
                     user_id,
                     "🚫 Ваш аккаунт заблокирован администратором. Если это ошибка — напишите в поддержку.",
-                    reply_markup=keyboards.create_support_keyboard()
+                    reply_markup=kb.as_markup()
                 )
             except Exception:
                 pass
@@ -554,7 +577,14 @@ def get_admin_router() -> Router:
             unban_user(user_id)
             await callback.message.answer(f"✅ Пользователь {user_id} разбанен")
             try:
-                await callback.bot.send_message(user_id, "✅ Доступ к аккаунту восстановлен администратором.")
+                # Отправляем пользователю уведомление о разбане с кнопкой в главное меню
+                kb = InlineKeyboardBuilder()
+                kb.row(keyboards.get_main_menu_button())
+                await callback.bot.send_message(
+                    user_id,
+                    "✅ Доступ к аккаунту восстановлен администратором.",
+                    reply_markup=kb.as_markup()
+                )
             except Exception:
                 pass
         except Exception as e:

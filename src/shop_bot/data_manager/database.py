@@ -175,59 +175,59 @@ def initialize_db():
             for key, value in default_settings.items():
                 cursor.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
             conn.commit()
-            logging.info("Database initialized successfully.")
+            logging.info("База данных успешно инициализирована.")
     except sqlite3.Error as e:
-        logging.error(f"Database error on initialization: {e}")
+        logging.error(f"Ошибка базы данных при инициализации: {e}")
 
 def run_migration():
     if not DB_FILE.exists():
-        logging.error("Users.db database file was not found. There is nothing to migrate.")
+        logging.error("Файл базы данных users.db не найден. Мигрировать нечего.")
         return
 
-    logging.info(f"Starting the migration of the database: {DB_FILE}")
+    logging.info(f"Начинаю миграцию базы данных: {DB_FILE}")
 
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
-        logging.info("The migration of the table 'users' ...")
+        logging.info("Миграция таблицы 'users' ...")
     
         cursor.execute("PRAGMA table_info(users)")
         columns = [row[1] for row in cursor.fetchall()]
         
         if 'referred_by' not in columns:
             cursor.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER")
-            logging.info(" -> The column 'referred_by' is successfully added.")
+            logging.info(" -> Столбец 'referred_by' успешно добавлен.")
         else:
-            logging.info(" -> The column 'referred_by' already exists.")
+            logging.info(" -> Столбец 'referred_by' уже существует.")
             
         if 'balance' not in columns:
             cursor.execute("ALTER TABLE users ADD COLUMN balance REAL DEFAULT 0")
-            logging.info(" -> The column 'balance' is successfully added.")
+            logging.info(" -> Столбец 'balance' успешно добавлен.")
         else:
-            logging.info(" -> The column 'balance' already exists.")
+            logging.info(" -> Столбец 'balance' уже существует.")
         
         if 'referral_balance' not in columns:
             cursor.execute("ALTER TABLE users ADD COLUMN referral_balance REAL DEFAULT 0")
-            logging.info(" -> The column 'referral_balance' is successfully added.")
+            logging.info(" -> Столбец 'referral_balance' успешно добавлен.")
         else:
-            logging.info(" -> The column 'referral_balance' already exists.")
+            logging.info(" -> Столбец 'referral_balance' уже существует.")
         
         if 'referral_balance_all' not in columns:
             cursor.execute("ALTER TABLE users ADD COLUMN referral_balance_all REAL DEFAULT 0")
-            logging.info(" -> The column 'referral_balance_all' is successfully added.")
+            logging.info(" -> Столбец 'referral_balance_all' успешно добавлен.")
         else:
-            logging.info(" -> The column 'referral_balance_all' already exists.")
+            logging.info(" -> Столбец 'referral_balance_all' уже существует.")
 
         if 'referral_start_bonus_received' not in columns:
             cursor.execute("ALTER TABLE users ADD COLUMN referral_start_bonus_received BOOLEAN DEFAULT 0")
-            logging.info(" -> The column 'referral_start_bonus_received' is successfully added.")
+            logging.info(" -> Столбец 'referral_start_bonus_received' успешно добавлен.")
         else:
-            logging.info(" -> The column 'referral_start_bonus_received' already exists.")
+            logging.info(" -> Столбец 'referral_start_bonus_received' уже существует.")
         
-        logging.info("The table 'users' has been successfully updated.")
+        logging.info("Таблица 'users' успешно обновлена.")
 
-        logging.info("The migration of the table 'Transactions' ...")
+        logging.info("Миграция таблицы 'transactions' ...")
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'")
         table_exists = cursor.fetchone()
@@ -237,21 +237,21 @@ def run_migration():
             trans_columns = [row[1] for row in cursor.fetchall()]
             
             if 'payment_id' in trans_columns and 'status' in trans_columns and 'username' in trans_columns:
-                logging.info("The 'Transactions' table already has a new structure. Migration is not required.")
+                logging.info("Таблица 'transactions' уже имеет новую структуру. Миграция не требуется.")
             else:
                 backup_name = f"transactions_backup_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                logging.warning(f"The old structure of the TRANSACTIONS table was discovered. I rename in '{backup_name}' ...")
+                logging.warning(f"Обнаружена старая структура таблицы 'transactions'. Переименовываю в '{backup_name}' ...")
                 cursor.execute(f"ALTER TABLE transactions RENAME TO {backup_name}")
                 
-                logging.info("I create a new table 'Transactions' with the correct structure ...")
+                logging.info("Создаю новую таблицу 'transactions' с корректной структурой ...")
                 create_new_transactions_table(cursor)
-                logging.info("The new table 'Transactions' has been successfully created. The old data is saved.")
+                logging.info("Новая таблица 'transactions' успешно создана. Старые данные сохранены.")
         else:
-            logging.info("TRANSACTIONS table was not found. I create a new one ...")
+            logging.info("Таблица 'transactions' не найдена. Создаю новую ...")
             create_new_transactions_table(cursor)
-            logging.info("The new table 'Transactions' has been successfully created.")
+            logging.info("Новая таблица 'transactions' успешно создана.")
 
-        logging.info("The migration of the table 'support_tickets' ...")
+        logging.info("Миграция таблицы 'support_tickets' ...")
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='support_tickets'")
         table_exists = cursor.fetchone()
@@ -260,20 +260,20 @@ def run_migration():
             st_columns = [row[1] for row in cursor.fetchall()]
             if 'forum_chat_id' not in st_columns:
                 cursor.execute("ALTER TABLE support_tickets ADD COLUMN forum_chat_id TEXT")
-                logging.info(" -> The column 'forum_chat_id' is successfully added to 'support_tickets'.")
+                logging.info(" -> Столбец 'forum_chat_id' успешно добавлен в 'support_tickets'.")
             else:
-                logging.info(" -> The column 'forum_chat_id' already exists in 'support_tickets'.")
+                logging.info(" -> Столбец 'forum_chat_id' уже существует в 'support_tickets'.")
             if 'message_thread_id' not in st_columns:
                 cursor.execute("ALTER TABLE support_tickets ADD COLUMN message_thread_id INTEGER")
-                logging.info(" -> The column 'message_thread_id' is successfully added to 'support_tickets'.")
+                logging.info(" -> Столбец 'message_thread_id' успешно добавлен в 'support_tickets'.")
             else:
-                logging.info(" -> The column 'message_thread_id' already exists in 'support_tickets'.")
+                logging.info(" -> Столбец 'message_thread_id' уже существует в 'support_tickets'.")
         else:
-            logging.warning("Table 'support_tickets' not found, skipping its migration.")
+            logging.warning("Таблица 'support_tickets' не найдена, пропускаю её миграцию.")
 
         conn.commit()
         
-        logging.info("The migration of the table 'support_messages' ...")
+        logging.info("Миграция таблицы 'support_messages' ...")
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='support_messages'")
         table_exists = cursor.fetchone()
@@ -282,13 +282,13 @@ def run_migration():
             sm_columns = [row[1] for row in cursor.fetchall()]
             if 'media' not in sm_columns:
                 cursor.execute("ALTER TABLE support_messages ADD COLUMN media TEXT")
-                logging.info(" -> The column 'media' is successfully added to 'support_messages'.")
+                logging.info(" -> Столбец 'media' успешно добавлен в 'support_messages'.")
             else:
-                logging.info(" -> The column 'media' already exists in 'support_messages'.")
+                logging.info(" -> Столбец 'media' уже существует в 'support_messages'.")
         else:
-            logging.warning("Table 'support_messages' not found, skipping its migration.")
+            logging.warning("Таблица 'support_messages' не найдена, пропускаю её миграцию.")
         
-        logging.info("The migration of the table 'xui_hosts' ...")
+        logging.info("Миграция таблицы 'xui_hosts' ...")
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='xui_hosts'")
         table_exists = cursor.fetchone()
@@ -297,25 +297,25 @@ def run_migration():
             xh_columns = [row[1] for row in cursor.fetchall()]
             if 'subscription_url' not in xh_columns:
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN subscription_url TEXT")
-                logging.info(" -> The column 'subscription_url' is successfully added to 'xui_hosts'.")
+                logging.info(" -> Столбец 'subscription_url' успешно добавлен в 'xui_hosts'.")
             else:
-                logging.info(" -> The column 'subscription_url' already exists in 'xui_hosts'.")
+                logging.info(" -> Столбец 'subscription_url' уже существует в 'xui_hosts'.")
             # SSH settings for speedtests (optional)
             if 'ssh_host' not in xh_columns:
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_host TEXT")
-                logging.info(" -> The column 'ssh_host' is successfully added to 'xui_hosts'.")
+                logging.info(" -> Столбец 'ssh_host' успешно добавлен в 'xui_hosts'.")
             if 'ssh_port' not in xh_columns:
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_port INTEGER")
-                logging.info(" -> The column 'ssh_port' is successfully added to 'xui_hosts'.")
+                logging.info(" -> Столбец 'ssh_port' успешно добавлен в 'xui_hosts'.")
             if 'ssh_user' not in xh_columns:
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_user TEXT")
-                logging.info(" -> The column 'ssh_user' is successfully added to 'xui_hosts'.")
+                logging.info(" -> Столбец 'ssh_user' успешно добавлен в 'xui_hosts'.")
             if 'ssh_password' not in xh_columns:
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_password TEXT")
-                logging.info(" -> The column 'ssh_password' is successfully added to 'xui_hosts'.")
+                logging.info(" -> Столбец 'ssh_password' успешно добавлен в 'xui_hosts'.")
             if 'ssh_key_path' not in xh_columns:
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_key_path TEXT")
-                logging.info(" -> The column 'ssh_key_path' is successfully added to 'xui_hosts'.")
+                logging.info(" -> Столбец 'ssh_key_path' успешно добавлен в 'xui_hosts'.")
             # Clean up host_name values from invisible spaces and trim
             try:
                 cursor.execute(
@@ -333,11 +333,11 @@ def run_migration():
                     """
                 )
                 conn.commit()
-                logging.info(" -> Normalized existing host_name values in 'xui_hosts'.")
+                logging.info(" -> Нормализованы существующие значения host_name в 'xui_hosts'.")
             except Exception as e:
-                logging.warning(f" -> Failed to normalize existing host_name values: {e}")
+                logging.warning(f" -> Не удалось нормализовать существующие значения host_name: {e}")
         else:
-            logging.warning("Table 'xui_hosts' not found, skipping its migration.")
+            logging.warning("Таблица 'xui_hosts' не найдена, пропускаю её миграцию.")
         # Create table for host speedtests
         try:
             cursor = conn.cursor()
@@ -361,16 +361,16 @@ def run_migration():
             )
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_host_speedtests_host_time ON host_speedtests(host_name, created_at DESC)")
             conn.commit()
-            logging.info("The table 'host_speedtests' is ready.")
+            logging.info("Таблица 'host_speedtests' готова к использованию.")
         except sqlite3.Error as e:
-            logging.error(f"Failed to create 'host_speedtests': {e}")
+            logging.error(f"Не удалось создать 'host_speedtests': {e}")
 
         conn.close()
         
-        logging.info("--- The database is successfully completed! ---")
+        logging.info("--- Миграция базы данных успешно завершена! ---")
 
     except sqlite3.Error as e:
-        logging.error(f"An error occurred during migration: {e}")
+        logging.error(f"Ошибка во время миграции: {e}")
 
 def create_new_transactions_table(cursor: sqlite3.Cursor):
     cursor.execute('''
@@ -414,9 +414,9 @@ def create_host(name: str, url: str, user: str, passwd: str, inbound: int, subsc
                     (name, url, user, passwd, inbound)
                 )
             conn.commit()
-            logging.info(f"Successfully created a new host: {name}")
+            logging.info(f"Успешно создан новый хост: {name}")
     except sqlite3.Error as e:
-        logging.error(f"Error creating host '{name}': {e}")
+        logging.error(f"Ошибка при создании хоста '{name}': {e}")
 
 def update_host_subscription_url(host_name: str, subscription_url: str | None) -> bool:
     try:
@@ -426,8 +426,9 @@ def update_host_subscription_url(host_name: str, subscription_url: str | None) -
             cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
             exists = cursor.fetchone() is not None
             if not exists:
-                logging.warning(f"update_host_subscription_url: host not found by name='{host_name}' (after TRIM)")
+                logging.warning(f"update_host_subscription_url: хост с именем '{host_name}' не найден (после TRIM)")
                 return False
+
             cursor.execute(
                 "UPDATE xui_hosts SET subscription_url = ? WHERE TRIM(host_name) = TRIM(?)",
                 (subscription_url, host_name)
@@ -435,7 +436,7 @@ def update_host_subscription_url(host_name: str, subscription_url: str | None) -
             conn.commit()
             return True
     except sqlite3.Error as e:
-        logging.error(f"Failed to update subscription_url for host '{host_name}': {e}")
+        logging.error(f"Не удалось обновить subscription_url для хоста '{host_name}': {e}")
         return False
 
 def set_referral_start_bonus_received(user_id: int) -> bool:
@@ -450,7 +451,7 @@ def set_referral_start_bonus_received(user_id: int) -> bool:
             conn.commit()
             return cursor.rowcount > 0
     except sqlite3.Error as e:
-        logging.error(f"Failed to set referral_start_bonus_received for user {user_id}: {e}")
+        logging.error(f"Не удалось пометить получение стартового реферального бонуса для пользователя {user_id}: {e}")
         return False
 
 def update_host_url(host_name: str, new_url: str) -> bool:
@@ -462,8 +463,9 @@ def update_host_url(host_name: str, new_url: str) -> bool:
             cursor = conn.cursor()
             cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
             if cursor.fetchone() is None:
-                logging.warning(f"update_host_url: host not found by name='{host_name}'")
+                logging.warning(f"update_host_url: хост с именем '{host_name}' не найден")
                 return False
+
             cursor.execute(
                 "UPDATE xui_hosts SET host_url = ? WHERE TRIM(host_name) = TRIM(?)",
                 (new_url, host_name)
@@ -471,7 +473,7 @@ def update_host_url(host_name: str, new_url: str) -> bool:
             conn.commit()
             return cursor.rowcount > 0
     except sqlite3.Error as e:
-        logging.error(f"Failed to update host_url for host '{host_name}': {e}")
+        logging.error(f"Не удалось обновить host_url для хоста '{host_name}': {e}")
         return False
 
 def update_host_name(old_name: str, new_name: str) -> bool:
@@ -486,13 +488,14 @@ def update_host_name(old_name: str, new_name: str) -> bool:
             cursor = conn.cursor()
             cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (old_name_n,))
             if cursor.fetchone() is None:
-                logging.warning(f"update_host_name: source host not found '{old_name_n}'")
+                logging.warning(f"update_host_name: исходный хост не найден '{old_name_n}'")
                 return False
             cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (new_name_n,))
             exists_target = cursor.fetchone() is not None
             if exists_target and old_name_n.lower() != new_name_n.lower():
-                logging.warning(f"update_host_name: target name '{new_name_n}' is already used")
+                logging.warning(f"update_host_name: целевое имя '{new_name_n}' уже используется")
                 return False
+
             cursor.execute(
                 "UPDATE xui_hosts SET host_name = TRIM(?) WHERE TRIM(host_name) = TRIM(?)",
                 (new_name_n, old_name_n)
@@ -508,7 +511,7 @@ def update_host_name(old_name: str, new_name: str) -> bool:
             conn.commit()
             return True
     except sqlite3.Error as e:
-        logging.error(f"Failed to rename host from '{old_name}' to '{new_name}': {e}")
+        logging.error(f"Не удалось переименовать хост с '{old_name}' на '{new_name}': {e}")
         return False
 
 def delete_host(host_name: str):
@@ -519,9 +522,9 @@ def delete_host(host_name: str):
             cursor.execute("DELETE FROM plans WHERE TRIM(host_name) = TRIM(?)", (host_name,))
             cursor.execute("DELETE FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
             conn.commit()
-            logging.info(f"Successfully deleted host '{host_name}' and its plans.")
+            logging.info(f"Хост '{host_name}' и его тарифы успешно удалены.")
     except sqlite3.Error as e:
-        logging.error(f"Error deleting host '{host_name}': {e}")
+        logging.error(f"Ошибка удаления хоста '{host_name}': {e}")
 
 def get_host(host_name: str) -> dict | None:
     try:
@@ -533,7 +536,7 @@ def get_host(host_name: str) -> dict | None:
             result = cursor.fetchone()
             return dict(result) if result else None
     except sqlite3.Error as e:
-        logging.error(f"Error getting host '{host_name}': {e}")
+        logging.error(f"Ошибка получения хоста '{host_name}': {e}")
         return None
 
 def update_host_ssh_settings(
@@ -553,8 +556,9 @@ def update_host_ssh_settings(
             cursor = conn.cursor()
             cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name_n,))
             if cursor.fetchone() is None:
-                logging.warning(f"update_host_ssh_settings: host not found '{host_name_n}'")
+                logging.warning(f"update_host_ssh_settings: хост не найден '{host_name_n}'")
                 return False
+
             cursor.execute(
                 """
                 UPDATE xui_hosts
@@ -573,7 +577,7 @@ def update_host_ssh_settings(
             conn.commit()
             return True
     except sqlite3.Error as e:
-        logging.error(f"Failed to update SSH settings for host '{host_name}': {e}")
+        logging.error(f"Не удалось обновить SSH-настройки для хоста '{host_name}': {e}")
         return False
 
 def delete_key_by_id(key_id: int) -> bool:
@@ -585,7 +589,7 @@ def delete_key_by_id(key_id: int) -> bool:
             conn.commit()
             return affected > 0
     except sqlite3.Error as e:
-        logging.error(f"Failed to delete key by id {key_id}: {e}")
+        logging.error(f"Не удалось удалить ключ по id {key_id}: {e}")
         return False
 
 def update_key_comment(key_id: int, comment: str) -> bool:
@@ -596,7 +600,7 @@ def update_key_comment(key_id: int, comment: str) -> bool:
             conn.commit()
             return cursor.rowcount > 0
     except sqlite3.Error as e:
-        logging.error(f"Failed to update key comment for {key_id}: {e}")
+        logging.error(f"Не удалось обновить комментарий ключа для {key_id}: {e}")
         return False
 
 def get_all_hosts() -> list[dict]:
@@ -614,7 +618,7 @@ def get_all_hosts() -> list[dict]:
                 result.append(d)
             return result
     except sqlite3.Error as e:
-        logging.error(f"Error getting list of all hosts: {e}")
+        logging.error(f"Ошибка получения списка всех хостов: {e}")
         return []
 
 def get_speedtests(host_name: str, limit: int = 20) -> list[dict]:
@@ -642,7 +646,7 @@ def get_speedtests(host_name: str, limit: int = 20) -> list[dict]:
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
     except sqlite3.Error as e:
-        logging.error(f"Failed to get speedtests for host '{host_name}': {e}")
+        logging.error(f"Не удалось получить speedtest-данные для хоста '{host_name}': {e}")
         return []
 
 def get_latest_speedtest(host_name: str) -> dict | None:
@@ -666,7 +670,7 @@ def get_latest_speedtest(host_name: str) -> dict | None:
             row = cursor.fetchone()
             return dict(row) if row else None
     except sqlite3.Error as e:
-        logging.error(f"Failed to get latest speedtest for host '{host_name}': {e}")
+        logging.error(f"Не удалось получить последний speedtest для хоста '{host_name}': {e}")
         return None
 
 def insert_host_speedtest(
@@ -711,7 +715,7 @@ def insert_host_speedtest(
             conn.commit()
             return True
     except sqlite3.Error as e:
-        logging.error(f"Failed to insert host speedtest for '{host_name}': {e}")
+        logging.error(f"Не удалось сохранить запись speedtest для '{host_name}': {e}")
         return False
 
 def get_admin_stats() -> dict:

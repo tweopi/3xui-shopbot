@@ -17,9 +17,12 @@ import secrets
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 from shop_bot.modules import xui_api
-from shop_bot.bot import handlers 
+from shop_bot.bot import handlers
+from shop_bot.bot import keyboards
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from shop_bot.support_bot_controller import SupportBotController
 from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager.database import (
@@ -68,15 +71,15 @@ def create_webhook_app(bot_controller_instance):
     template_dir = os.path.join(app_dir, 'templates')
     template_file = os.path.join(template_dir, 'login.html')
 
-    print("--- DIAGNOSTIC INFORMATION ---", flush=True)
-    print(f"Current Working Directory: {os.getcwd()}", flush=True)
-    print(f"Path of running app.py: {app_file_path}", flush=True)
-    print(f"Directory of running app.py: {app_dir}", flush=True)
-    print(f"Expected templates directory: {template_dir}", flush=True)
-    print(f"Expected login.html path: {template_file}", flush=True)
-    print(f"Does template directory exist? -> {os.path.isdir(template_dir)}", flush=True)
-    print(f"Does login.html file exist? -> {os.path.isfile(template_file)}", flush=True)
-    print("--- END DIAGNOSTIC INFORMATION ---", flush=True)
+    logger.debug("--- ДИАГНОСТИЧЕСКАЯ ИНФОРМАЦИЯ ---")
+    logger.debug(f"Текущая рабочая директория: {os.getcwd()}")
+    logger.debug(f"Путь к исполняемому app.py: {app_file_path}")
+    logger.debug(f"Директория app.py: {app_dir}")
+    logger.debug(f"Ожидаемая директория шаблонов: {template_dir}")
+    logger.debug(f"Ожидаемый путь к login.html: {template_file}")
+    logger.debug(f"Директория шаблонов существует? -> {os.path.isdir(template_dir)}")
+    logger.debug(f"Файл login.html существует? -> {os.path.isfile(template_file)}")
+    logger.debug("--- КОНЕЦ ДИАГНОСТИКИ ---")
     
     flask_app = Flask(
         __name__,
@@ -341,15 +344,15 @@ def create_webhook_app(bot_controller_instance):
                     loop = current_app.config.get('EVENT_LOOP')
                     if loop and loop.is_running():
                         asyncio.run_coroutine_threadsafe(bot.send_message(chat_id=user_id, text=text), loop)
-                        logger.info(f"Balance notify scheduled for user {user_id}")
+                        logger.info(f"Запланирована отправка уведомления о балансе пользователю {user_id}")
                     else:
                         # fallback, если по какой-то причине нет общего цикла (не рекомендуется, но лучше чем молча не отправить)
-                        logger.warning("EVENT_LOOP is not running; using fallback asyncio.run for balance notification")
+                        logger.warning("Цикл событий (EVENT_LOOP) не запущен; использую резервный asyncio.run для уведомления о балансе")
                         asyncio.run(bot.send_message(chat_id=user_id, text=text))
                 else:
-                    logger.warning("Bot instance is None; cannot send balance notification")
+                    logger.warning("Экземпляр бота отсутствует; не могу отправить уведомление о балансе")
         except Exception as e:
-            logger.warning(f"Failed to send balance notification: {e}")
+            logger.warning(f"Не удалось отправить уведомление о балансе: {e}")
         return redirect(url_for('users_page'))
 
     @flask_app.route('/admin/keys')
@@ -424,7 +427,7 @@ def create_webhook_app(bot_controller_instance):
         try:
             result = asyncio.run(xui_api.create_or_update_key_on_host(host_name, key_email, expiry_timestamp_ms=expiry_ms or None))
         except Exception as e:
-            logger.error(f"Failed to create/update key on host: {e}")
+            logger.error(f"Не удалось создать/обновить ключ на хосте: {e}")
             result = None
         if not result:
             flash('Не удалось создать ключ на хосте. Проверьте доступность XUI.', 'danger')
@@ -462,7 +465,7 @@ def create_webhook_app(bot_controller_instance):
                 else:
                     asyncio.run(bot.send_message(chat_id=user_id, text=text, parse_mode='HTML', disable_web_page_preview=True))
         except Exception as e:
-            logger.warning(f"Failed to notify user about new key: {e}")
+            logger.warning(f"Не удалось уведомить пользователя о новом ключе: {e}")
         return redirect(request.referrer or url_for('admin_keys_page'))
 
     @flask_app.route('/admin/keys/create-ajax', methods=['POST'])
@@ -486,7 +489,7 @@ def create_webhook_app(bot_controller_instance):
             result = asyncio.run(xui_api.create_or_update_key_on_host(host_name, key_email, expiry_timestamp_ms=expiry_ms or None))
         except Exception as e:
             result = None
-            logger.error(f"create_key_ajax_route: host error: {e}")
+            logger.error(f"create_key_ajax_route: ошибка панели/хоста: {e}")
         if not result:
             return jsonify({"ok": False, "error": "host_failed"}), 500
 
@@ -514,7 +517,7 @@ def create_webhook_app(bot_controller_instance):
                 else:
                     asyncio.run(bot.send_message(chat_id=user_id, text=text, parse_mode='HTML', disable_web_page_preview=True))
         except Exception as e:
-            logger.warning(f"Failed to notify user (ajax): {e}")
+            logger.warning(f"Не удалось уведомить пользователя (ajax): {e}")
 
         return jsonify({
             "ok": True,
@@ -881,9 +884,9 @@ def create_webhook_app(bot_controller_instance):
                             text = f"Ответ по тикету #{ticket_id}:\n\n{message}"
                             asyncio.run_coroutine_threadsafe(bot.send_message(user_chat_id, text), loop)
                         else:
-                            logger.error("Support reply: support bot or event loop is not available; message not sent to user.")
+                            logger.error("Ответ поддержки: support-бот или цикл событий недоступны; сообщение пользователю не отправлено.")
                     except Exception as e:
-                        logger.error(f"Support reply: failed to send Telegram message to user {ticket.get('user_id')} via support-bot: {e}", exc_info=True)
+                        logger.error(f"Ответ поддержки: не удалось отправить сообщение пользователю {ticket.get('user_id')} через support-бота: {e}", exc_info=True)
                     try:
                         bot = _support_bot_controller.get_bot_instance()
                         loop = current_app.config.get('EVENT_LOOP')
@@ -896,7 +899,7 @@ def create_webhook_app(bot_controller_instance):
                                 loop
                             )
                     except Exception as e:
-                        logger.warning(f"Support reply: failed to mirror message to forum thread for ticket {ticket_id}: {e}")
+                        logger.warning(f"Ответ поддержки: не удалось отзеркалить сообщение в тему форума для тикета {ticket_id}: {e}")
                     flash('Ответ отправлен.', 'success')
                 return redirect(url_for('support_ticket_page', ticket_id=ticket_id))
             elif action == 'close':
@@ -912,7 +915,7 @@ def create_webhook_app(bot_controller_instance):
                                 loop
                             )
                     except Exception as e:
-                        logger.warning(f"Support close: failed to close forum topic for ticket {ticket_id}: {e}")
+                        logger.warning(f"Закрытие тикета: не удалось закрыть тему форума для тикета {ticket_id}: {e}")
                     try:
                         bot = _support_bot_controller.get_bot_instance()
                         loop = current_app.config.get('EVENT_LOOP')
@@ -921,7 +924,7 @@ def create_webhook_app(bot_controller_instance):
                             text = f"✅ Ваш тикет #{ticket_id} был закрыт администратором. Вы можете создать новое обращение при необходимости."
                             asyncio.run_coroutine_threadsafe(bot.send_message(int(user_chat_id), text), loop)
                     except Exception as e:
-                        logger.warning(f"Support close: failed to notify user {ticket.get('user_id')} about closing ticket #{ticket_id}: {e}")
+                        logger.warning(f"Закрытие тикета: не удалось уведомить пользователя {ticket.get('user_id')} о закрытии тикета #{ticket_id}: {e}")
                     flash('Тикет закрыт.', 'success')
                 else:
                     flash('Не удалось закрыть тикет.', 'danger')
@@ -939,7 +942,7 @@ def create_webhook_app(bot_controller_instance):
                                 loop
                             )
                     except Exception as e:
-                        logger.warning(f"Support open: failed to reopen forum topic for ticket {ticket_id}: {e}")
+                        logger.warning(f"Открытие тикета: не удалось переоткрыть тему форума для тикета {ticket_id}: {e}")
                     # Notify user
                     try:
                         bot = _support_bot_controller.get_bot_instance()
@@ -949,7 +952,7 @@ def create_webhook_app(bot_controller_instance):
                             text = f"🔓 Ваш тикет #{ticket_id} снова открыт. Вы можете продолжить переписку."
                             asyncio.run_coroutine_threadsafe(bot.send_message(int(user_chat_id), text), loop)
                     except Exception as e:
-                        logger.warning(f"Support open: failed to notify user {ticket.get('user_id')} about opening ticket #{ticket_id}: {e}")
+                        logger.warning(f"Открытие тикета: не удалось уведомить пользователя {ticket.get('user_id')} об открытии тикета #{ticket_id}: {e}")
                     flash('Тикет открыт.', 'success')
                 else:
                     flash('Не удалось открыть тикет.', 'danger')
@@ -1000,7 +1003,7 @@ def create_webhook_app(bot_controller_instance):
                     )
                     fut.result(timeout=5)
                 except Exception as e:
-                    logger.warning(f"Delete forum topic failed for ticket {ticket_id} (chat {forum_chat_id}, thread {thread_id}): {e}. Trying to close topic as fallback.")
+                    logger.warning(f"Удаление темы форума не удалось для тикета {ticket_id} (чат {forum_chat_id}, тема {thread_id}): {e}. Пытаюсь закрыть тему как фолбэк.")
                     try:
                         fut2 = asyncio.run_coroutine_threadsafe(
                             bot.close_forum_topic(chat_id=int(forum_chat_id), message_thread_id=int(thread_id)),
@@ -1008,11 +1011,11 @@ def create_webhook_app(bot_controller_instance):
                         )
                         fut2.result(timeout=5)
                     except Exception as e2:
-                        logger.warning(f"Fallback close forum topic also failed for ticket {ticket_id}: {e2}")
+                        logger.warning(f"Фолбэк-закрытие темы форума также не удалось для тикета {ticket_id}: {e2}")
             else:
-                logger.error("Support delete: support bot or event loop unavailable, or missing forum ids; topic not deleted.")
+                logger.error("Удаление тикета: support-бот или цикл событий недоступны, либо отсутствуют forum_chat_id/message_thread_id; тема не удалена.")
         except Exception as e:
-            logger.warning(f"Failed to process forum topic deletion for ticket {ticket_id} before deletion: {e}")
+            logger.warning(f"Не удалось обработать удаление темы форума для тикета {ticket_id} перед удалением: {e}")
         if delete_ticket(ticket_id):
             flash(f"Тикет #{ticket_id} удалён.", 'success')
         else:
@@ -1188,6 +1191,46 @@ def create_webhook_app(bot_controller_instance):
     def ban_user_route(user_id):
         ban_user(user_id)
         flash(f'Пользователь {user_id} был заблокирован.', 'success')
+        # Telegram-уведомление пользователю о бане с кнопкой поддержки (без кнопки "Назад в меню")
+        try:
+            bot = _bot_controller.get_bot_instance()
+            if bot:
+                text = "🚫 Ваш аккаунт заблокирован администратором. Если это ошибка — напишите в поддержку."
+                # Собираем клавиатуру из одной кнопки поддержки
+                try:
+                    support = (get_setting("support_bot_username") or get_setting("support_user") or "").strip()
+                except Exception:
+                    support = ""
+                kb = InlineKeyboardBuilder()
+                url: str | None = None
+                if support:
+                    if support.startswith("@"):  # @username
+                        url = f"tg://resolve?domain={support[1:]}"
+                    elif support.startswith("tg://"):
+                        url = support
+                    elif support.startswith("http://") or support.startswith("https://"):
+                        try:
+                            part = support.split("/")[-1].split("?")[0]
+                            if part:
+                                url = f"tg://resolve?domain={part}"
+                        except Exception:
+                            url = support
+                    else:
+                        url = f"tg://resolve?domain={support}"
+                if url:
+                    kb.button(text="🆘 Написать в поддержку", url=url)
+                else:
+                    kb.button(text="🆘 Поддержка", callback_data="show_help")
+                loop = current_app.config.get('EVENT_LOOP')
+                if loop and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        bot.send_message(chat_id=user_id, text=text, reply_markup=kb.as_markup()),
+                        loop
+                    )
+                else:
+                    asyncio.run(bot.send_message(chat_id=user_id, text=text, reply_markup=kb.as_markup()))
+        except Exception as e:
+            logger.warning(f"Не удалось отправить уведомление о бане пользователю {user_id}: {e}")
         return redirect(url_for('users_page'))
 
     @flask_app.route('/users/unban/<int:user_id>', methods=['POST'])
@@ -1195,6 +1238,23 @@ def create_webhook_app(bot_controller_instance):
     def unban_user_route(user_id):
         unban_user(user_id)
         flash(f'Пользователь {user_id} был разблокирован.', 'success')
+        # Telegram-уведомление пользователю о разбане с кнопкой перехода в главное меню
+        try:
+            bot = _bot_controller.get_bot_instance()
+            if bot:
+                kb = InlineKeyboardBuilder()
+                kb.row(keyboards.get_main_menu_button())
+                text = "✅ Доступ к аккаунту восстановлен администратором."
+                loop = current_app.config.get('EVENT_LOOP')
+                if loop and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        bot.send_message(chat_id=user_id, text=text, reply_markup=kb.as_markup()),
+                        loop
+                    )
+                else:
+                    asyncio.run(bot.send_message(chat_id=user_id, text=text, reply_markup=kb.as_markup()))
+        except Exception as e:
+            logger.warning(f"Не удалось отправить уведомление о разбане пользователю {user_id}: {e}")
         return redirect(url_for('users_page'))
 
     @flask_app.route('/users/revoke/<int:user_id>', methods=['POST'])
@@ -1323,10 +1383,10 @@ def create_webhook_app(bot_controller_instance):
                     if loop and loop.is_running():
                         asyncio.run_coroutine_threadsafe(payment_processor(bot, metadata), loop)
                     else:
-                        logger.error("YooKassa webhook: Event loop is not available!")
+                        logger.error("YooKassa вебхук: цикл событий недоступен!")
             return 'OK', 200
         except Exception as e:
-            logger.error(f"Error in yookassa webhook handler: {e}", exc_info=True)
+            logger.error(f"Ошибка в обработчике вебхука YooKassa: {e}", exc_info=True)
             return 'Error', 500
         
     @csrf.exempt
@@ -1341,12 +1401,12 @@ def create_webhook_app(bot_controller_instance):
                 payload_string = payload_data.get('payload')
                 
                 if not payload_string:
-                    logger.warning("CryptoBot Webhook: Received paid invoice but payload was empty.")
+                    logger.warning("CryptoBot вебхук: Получен оплаченный invoice, но payload пустой.")
                     return 'OK', 200
 
                 parts = payload_string.split(':')
                 if len(parts) < 9:
-                    logger.error(f"cryptobot Webhook: Invalid payload format received: {payload_string}")
+                    logger.error(f"CryptoBot вебхук: некорректный формат payload: {payload_string}")
                     return 'Error', 400
 
                 metadata = {
@@ -1368,12 +1428,12 @@ def create_webhook_app(bot_controller_instance):
                 if bot and loop and loop.is_running():
                     asyncio.run_coroutine_threadsafe(payment_processor(bot, metadata), loop)
                 else:
-                    logger.error("cryptobot Webhook: Could not process payment because bot or event loop is not running.")
+                    logger.error("CryptoBot вебхук: не удалось обработать платёж — бот или цикл событий не запущены.")
 
             return 'OK', 200
             
         except Exception as e:
-            logger.error(f"Error in cryptobot webhook handler: {e}", exc_info=True)
+            logger.error(f"Ошибка в обработчике вебхука CryptoBot: {e}", exc_info=True)
             return 'Error', 500
         
     @csrf.exempt
@@ -1381,7 +1441,7 @@ def create_webhook_app(bot_controller_instance):
     def heleket_webhook_handler():
         try:
             data = request.json
-            logger.info(f"Received Heleket webhook: {data}")
+            logger.info(f"Получен вебхук Heleket: {data}")
 
             api_key = get_setting("heleket_api_key")
             if not api_key: return 'Error', 500
@@ -1396,7 +1456,7 @@ def create_webhook_app(bot_controller_instance):
             expected_sign = hashlib.md5(raw_string.encode()).hexdigest()
 
             if not compare_digest(expected_sign, sign):
-                logger.warning("Heleket webhook: Invalid signature.")
+                logger.warning("Heleket вебхук: недействительная подпись.")
                 return 'Forbidden', 403
 
             if data.get('status') in ["paid", "paid_over"]:
@@ -1414,7 +1474,7 @@ def create_webhook_app(bot_controller_instance):
             
             return 'OK', 200
         except Exception as e:
-            logger.error(f"Error in heleket webhook handler: {e}", exc_info=True)
+            logger.error(f"Ошибка в обработчике вебхука Heleket: {e}", exc_info=True)
             return 'Error', 500
         
     @csrf.exempt
@@ -1422,7 +1482,7 @@ def create_webhook_app(bot_controller_instance):
     def ton_webhook_handler():
         try:
             data = request.json
-            logger.info(f"Received TonAPI webhook: {data}")
+            logger.info(f"Получен вебхук TonAPI: {data}")
 
             if 'tx_id' in data:
                 account_id = data.get('account_id')
@@ -1446,7 +1506,7 @@ def create_webhook_app(bot_controller_instance):
             
             return 'OK', 200
         except Exception as e:
-            logger.error(f"Error in ton webhook handler: {e}", exc_info=True)
+            logger.error(f"Ошибка в обработчике вебхука TonAPI: {e}", exc_info=True)
             return 'Error', 500
 
     return flask_app
