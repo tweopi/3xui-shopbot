@@ -1700,23 +1700,45 @@ async def notify_admin_of_purchase(bot: Bot, metadata: dict):
         logger.warning(f"notify_admin_of_purchase failed: {e}")
 
 async def process_successful_payment(bot: Bot, metadata: dict):
-    try:
-        action = metadata.get('action')
-        user_id = int(metadata.get('user_id'))
-        price = float(metadata.get('price'))
-        # Поля ниже нужны только для покупок ключей/продлений
-        months = int(metadata.get('months', 0))
-        key_id = int(metadata.get('key_id', 0)) if metadata.get('key_id') is not None else 0
-        host_name = metadata.get('host_name', '')
-        plan_id = int(metadata.get('plan_id', 0)) if metadata.get('plan_id') is not None else 0
-        customer_email = metadata.get('customer_email')
-        payment_method = metadata.get('payment_method')
+    # Некоторые провайдеры (или счета, созданные в кабинете) могут присылать
+    # вебхуки с чужими/неожиданными ключами метаданных. В этом случае просто игнорируем такие события.
+    required_keys = ['user_id', 'price', 'action']
+    if not all(k in metadata for k in required_keys):
+        logger.warning(f"Ignoring payment webhook with unexpected metadata keys: {metadata}")
+        return
 
-        chat_id_to_delete = metadata.get('chat_id')
-        message_id_to_delete = metadata.get('message_id')
-        
-    except (ValueError, TypeError) as e:
-        logger.error(f"FATAL: Could not parse metadata. Error: {e}. Metadata: {metadata}")
+    def _to_int(val, default=0):
+        try:
+            if val is None or val == '':
+                return default
+            return int(val)
+        except (TypeError, ValueError):
+            return default
+
+    def _to_float(val, default=0.0):
+        try:
+            if val is None or val == '':
+                return default
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
+    action = (metadata.get('action') or '').strip()
+    user_id = _to_int(metadata.get('user_id'))
+    price = _to_float(metadata.get('price'))
+    # Поля ниже нужны только для покупок ключей/продлений
+    months = _to_int(metadata.get('months'))
+    key_id = _to_int(metadata.get('key_id'))
+    host_name = metadata.get('host_name') or ''
+    plan_id = _to_int(metadata.get('plan_id'))
+    customer_email = metadata.get('customer_email')
+    payment_method = metadata.get('payment_method')
+
+    chat_id_to_delete = metadata.get('chat_id')
+    message_id_to_delete = metadata.get('message_id')
+
+    if not user_id or price <= 0:
+        logger.error(f"FATAL: Could not parse essential metadata fields. Metadata: {metadata}")
         return
 
     if chat_id_to_delete and message_id_to_delete:
