@@ -52,6 +52,38 @@
   .button-secondary:hover { background: #e9e9e9; }
   .plan-edit-toggle[aria-expanded="true"] { transform: rotate(0deg); }
   .plan-edit-toggle { transition: transform 180ms ease; }
+
+  /* Soft-select использует глобальные стили из static/css/style.css */
+  .soft-select select { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+  /* Бейдж даты без лишних линий */
+  #backup-date.badge { border: 0; }
+  /* Небольшой отступ сверху для текста под селектом на узких экранах */
+  @media (max-width: 767.98px){
+    #backup-date.badge { margin-top: 6px; }
+  }
+
+  /* Правки для "линий" в блоке выбора файла */
+  #btn-pick-file.btn,
+  #picked-file-name.form-control {
+    border-color: rgba(255,255,255,.14) !important;
+    box-shadow: none !important;
+    background: rgba(17,20,28,.45) !important;
+    color: inherit;
+  }
+  /* Единая "пилюля": скрываем внутренние границы, оставляем только внешние */
+  #btn-pick-file.btn { border-right-width: 0 !important; }
+  #picked-file-name.form-control { border-left-width: 0 !important; }
+  /* Сохраняем цельные скругления только на внешних краях */
+  .input-group > .btn.pill.rounded-start { border-top-right-radius: 0 !important; border-bottom-right-radius: 0 !important; }
+  .input-group > .form-control.pill.rounded-end { border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; }
+  /* Наведение/фокус без подсветки швов */
+  #btn-pick-file.btn:hover,
+  #btn-pick-file.btn:focus,
+  #picked-file-name.form-control:focus {
+    background: rgba(17,20,28,.52) !important;
+    border-color: rgba(255,255,255,.18) !important;
+    box-shadow: none !important;
+  }
 </style>
 
 <div class="settings-container">
@@ -294,9 +326,70 @@
                             <input class="form-control pill-md" type="number" min="0" step="1" id="backup_interval_days" name="backup_interval_days" value="{{ settings.backup_interval_days or '1' }}" placeholder="1" />
                             <div class="form-text">0 — отключить автобэкап. При включении архив БД будет отправляться администраторам и сохраняться в /app/project/backups.</div>
                         </div>
-					</div>
-				</div>
-			</section>
+
+                        <div class="mb-3">
+                          <div class="row g-2 align-items-start">
+                            <div class="col-12 col-md-5">
+                              <label class="form-label">Бэкап базы</label>
+                              <div class="d-grid">
+                              <button type="submit"
+                                      class="btn btn-outline-primary w-100"
+                                      formmethod="post"
+                                      formaction="{{ url_for('backup_db_route') }}"
+                                      title="Скачать текущий архив БД">
+                                <i class="ti ti-database-export me-1"></i>
+                                Скачать бэкап БД
+                              </button>
+                              </div>
+                            </div>
+                            <div class="col-12 col-md-7">
+                              <label class="form-label" for="existing_backup">Восстановление: выбрать готовый бэкап</label>
+                              <div class="row g-2 align-items-center">
+                                <div class="col-12">
+                                  <div class="d-flex align-items-center gap-2 w-100">
+                                    <div class="soft-select flex-grow-1" data-target="existing_backup" style="min-width:0;">
+                                      <button type="button" class="soft-select-toggle pill" id="existing_backup_toggle">—</button>
+                                      <div class="soft-select-menu" id="existing_backup_menu"></div>
+                                      <select class="form-select pill" id="existing_backup" name="existing_backup">
+                                        <option value="" selected>— Выберите архив из списка —</option>
+                                        {% for b in backups %}
+                                          <option value="{{ b.name }}" data-mtime="{{ b.mtime }}">{{ b.name }}</option>
+                                        {% endfor %}
+                                      </select>
+                                    </div>
+                                    <span class="badge bg-secondary-lt rounded-pill px-3" id="backup-date" title="Дата архива">—</span>
+                                  </div>
+                                  <div class="form-text text-secondary">Дата выбранного архива отображается справа.</div>
+                                </div>
+                              </div>
+
+                              <div class="mt-2 small text-secondary">Или загрузите свой файл (.zip или .db)</div>
+                              <div class="d-flex align-items-stretch gap-2">
+                                <div class="input-group w-100 seamless">
+                                  <button type="button" class="btn btn-outline-secondary pill rounded-start" id="btn-pick-file">
+                                    <i class="ti ti-upload me-1"></i>
+                                    Выбрать файл
+                                  </button>
+                                  <input type="text" class="form-control pill rounded-end" id="picked-file-name" value="Файл не выбран" readonly style="min-width:0;">
+                                </div>
+                                <button type="submit"
+                                        class="btn btn-danger pill ms-2"
+                                        formmethod="post"
+                                        formaction="{{ url_for('restore_db_route') }}"
+                                        formenctype="multipart/form-data"
+                                        title="Текущая БД будет заменена на содержимое выбранного архива">
+                                  <i class="ti ti-database-import me-1"></i>
+                                  Восстановить
+                                </button>
+                              </div>
+                              <input class="d-none" type="file" id="db_file" name="db_file" accept=".zip,.db" />
+                              <div class="form-text text-secondary">Перед восстановлением текущая база автоматически сохраняется в /app/project/backups.</div>
+                            </div>
+                          </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
 			<section class="settings-section" id="bot">
 				<div class="card">

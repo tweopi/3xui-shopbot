@@ -39,6 +39,19 @@
 .input-group .input-group-text { position: relative; z-index: 2; }
 .input-group .soft-select .soft-select-toggle { position: relative; z-index: 1; }
 
+/* Seamless input-group: remove inner seam between siblings (btn + input) */
+.input-group.seamless > .btn,
+.input-group.seamless > .form-control,
+.input-group.seamless > .form-select {
+  background: rgba(17,20,28,0.45) !important;
+  border-color: rgba(255,255,255,0.08) !important;
+  color: inherit !important;
+  box-shadow: none !important;
+}
+.input-group.seamless > .btn.rounded-start { border-right-width: 0 !important; margin-right: -1px; }
+.input-group.seamless > .form-control.rounded-end,
+.input-group.seamless > .form-select.rounded-end { border-left-width: 0 !important; margin-left: -1px; }
+
 /* Make soft-select toggle border color match controls for seamless look */
 .soft-select-toggle { border-color: var(--border-color) !important; background: color-mix(in oklab, var(--bg-surface) 90%, transparent) !important; }
 

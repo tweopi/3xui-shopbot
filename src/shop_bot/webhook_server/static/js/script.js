@@ -675,6 +675,159 @@ document.addEventListener('DOMContentLoaded', function () {
     initializeThemeToggle();
     initializeCsrfForForms();
 
+    // --- Backup/Restore UI (settings -> panel) ---
+    (function initializeBackupRestoreUI(){
+        const select = document.getElementById('existing_backup');
+        const dateBadge = document.getElementById('backup-date');
+        const pickBtn = document.getElementById('btn-pick-file');
+        const fileInput = document.getElementById('db_file');
+        const fileNameBox = document.getElementById('picked-file-name');
+        if (!select && !fileInput) return; // not on settings panel
+
+        function setDateText(val){
+            if (!dateBadge) return;
+            dateBadge.textContent = val && val.trim() ? val : '—';
+        }
+
+        // When select changes — show date and clear file input
+        if (select){
+            select.addEventListener('change', () => {
+                const opt = select.options[select.selectedIndex];
+                const mtime = opt ? (opt.getAttribute('data-mtime') || '') : '';
+                setDateText(mtime);
+                if (fileInput){
+                    try { fileInput.value = ''; } catch(_){}
+                }
+                if (fileNameBox){ fileNameBox.value = fileInput && fileInput.files && fileInput.files[0] ? (fileInput.files[0].name||'Файл не выбран') : 'Файл не выбран'; }
+            });
+        }
+
+        // Pretty file picker: open hidden input, show filename, clear select
+        if (pickBtn && fileInput){
+            pickBtn.addEventListener('click', () => {
+                try { fileInput.click(); } catch(_){ }
+            });
+            fileInput.addEventListener('change', () => {
+                const name = (fileInput.files && fileInput.files[0]) ? (fileInput.files[0].name || 'Файл не выбран') : 'Файл не выбран';
+                if (fileNameBox) fileNameBox.value = name;
+                if (select){ select.value = ''; }
+                setDateText('');
+            });
+        }
+
+        // Soft-select UI for existing_backup — unify behavior with referral soft-select
+        (function(){
+            const wrap = document.querySelector('.soft-select[data-target="existing_backup"]');
+            const selectEl = document.getElementById('existing_backup');
+            if (!wrap || !selectEl) return;
+            const toggleEl = document.getElementById('existing_backup_toggle');
+            const menuEl = document.getElementById('existing_backup_menu');
+            if (!toggleEl || !menuEl) return;
+
+            function labelForOption(opt){
+                const txt = (opt && (opt.textContent || '').trim()) || '';
+                return txt || '— Не выбран —';
+            }
+
+            function build(){
+                // Render menu items (fixed-position container like in referral soft-select)
+                menuEl.innerHTML = '';
+                const opts = Array.from(selectEl.options||[]);
+
+                // First placeholder
+                const ph = document.createElement('div');
+                ph.className = 'soft-select-item is-placeholder' + (selectEl.value === '' ? ' is-active' : '');
+                ph.textContent = '— Выберите архив из списка —';
+                ph.addEventListener('click', () => {
+                    selectEl.value = '';
+                    selectEl.dispatchEvent(new Event('change', { bubbles:true }));
+                    closeMenu();
+                });
+                menuEl.appendChild(ph);
+
+                // Items
+                opts.forEach(opt => {
+                    if (opt.value === '') return; // skip placeholder option
+                    const item = document.createElement('div');
+                    item.className = 'soft-select-item' + (opt.selected ? ' is-active' : '');
+                    item.dataset.value = opt.value;
+                    item.textContent = labelForOption(opt);
+                    item.addEventListener('click', () => {
+                        selectEl.value = opt.value;
+                        // active visual
+                        menuEl.querySelectorAll('.soft-select-item').forEach(n => n.classList.remove('is-active'));
+                        item.classList.add('is-active');
+                        // update toggle label
+                        toggleEl.textContent = labelForOption(opt);
+                        closeMenu();
+                        // fire change
+                        selectEl.dispatchEvent(new Event('change', { bubbles:true }));
+                    });
+                    menuEl.appendChild(item);
+                });
+
+                const active = opts.find(o=>o.selected) || opts[0];
+                toggleEl.textContent = labelForOption(active);
+            }
+
+            function placeMenu(){
+                const r = toggleEl.getBoundingClientRect();
+                menuEl.style.position = 'fixed';
+                menuEl.style.left = `${Math.round(r.left)}px`;
+                // measure height to position upwards
+                const prevDisplay = menuEl.style.display;
+                menuEl.style.display = 'block';
+                const h = Math.max(0, menuEl.offsetHeight || 0);
+                // default: open upwards
+                let top = Math.round(r.top - h - 6);
+                // clamp to viewport top; if not enough space, fallback below
+                if (top < 8) {
+                    const below = Math.round(r.bottom + 6);
+                    // if opening below goes off-screen bottom, still clamp to 8
+                    const maxBottom = window.innerHeight - 8;
+                    top = Math.min(below, maxBottom - h);
+                }
+                menuEl.style.top = `${top}px`;
+                menuEl.style.width = `${Math.round(r.width)}px`;
+                menuEl.style.zIndex = '1065';
+                // restore intended visibility state
+                menuEl.style.display = prevDisplay || 'block';
+            }
+            function openMenu(){
+                if (menuEl.parentElement !== document.body) document.body.appendChild(menuEl);
+                placeMenu();
+                wrap.classList.add('open');
+                menuEl.style.display = 'block';
+                window.addEventListener('scroll', placeMenu, true);
+                window.addEventListener('resize', placeMenu, true);
+            }
+            function closeMenu(){
+                wrap.classList.remove('open');
+                menuEl.style.display = 'none';
+                if (menuEl.parentElement === document.body) wrap.appendChild(menuEl);
+                window.removeEventListener('scroll', placeMenu, true);
+                window.removeEventListener('resize', placeMenu, true);
+            }
+
+            toggleEl.addEventListener('click', (e)=>{
+                e.stopPropagation();
+                if (wrap.classList.contains('open')) closeMenu(); else openMenu();
+            });
+            document.addEventListener('click', (e)=>{ if (!wrap.contains(e.target)) closeMenu(); });
+            document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeMenu(); });
+
+            // Keep toggle label and date badge in sync
+            selectEl.addEventListener('change', ()=>{
+                const selOpt = selectEl.options[selectEl.selectedIndex];
+                toggleEl.textContent = labelForOption(selOpt);
+                const mtime = selOpt ? (selOpt.getAttribute('data-mtime')||'') : '';
+                if (dateBadge) dateBadge.textContent = mtime || '—';
+            });
+
+            build();
+        })();
+    })();
+
     // Referrals UI (settings): show/hide fields by reward type and sync legacy toggle
     (function(){
         const select = document.getElementById('referral_reward_type');

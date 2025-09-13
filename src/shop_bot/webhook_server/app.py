@@ -11,7 +11,7 @@ from hmac import compare_digest
 from datetime import datetime
 from functools import wraps
 from math import ceil
-from flask import Flask, request, render_template, redirect, url_for, flash, session, current_app, jsonify
+from flask import Flask, request, render_template, redirect, url_for, flash, session, current_app, jsonify, send_file
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 import secrets
 
@@ -25,6 +25,7 @@ from shop_bot.bot import keyboards
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from shop_bot.support_bot_controller import SupportBotController
 from shop_bot.data_manager import speedtest_runner
+from shop_bot.data_manager import backup_manager
 from shop_bot.data_manager.database import (
     get_all_settings, update_setting, get_all_hosts, get_plans_for_host,
     create_host, delete_host, create_plan, delete_plan, update_plan, get_user_count,
@@ -1059,8 +1060,87 @@ def create_webhook_app(bot_controller_instance):
             except Exception:
                 host['latest_speedtest'] = None
         
+        # Список доступных бэкапов на сервере (zip)
+        backups = []
+        try:
+            from pathlib import Path
+            bdir = backup_manager.BACKUPS_DIR
+            for p in sorted(bdir.glob('db-backup-*.zip'), key=lambda x: x.stat().st_mtime, reverse=True):
+                try:
+                    st = p.stat()
+                    backups.append({
+                        'name': p.name,
+                        'mtime': datetime.fromtimestamp(st.st_mtime).strftime('%Y-%m-%d %H:%M'),
+                        'size': st.st_size
+                    })
+                except Exception:
+                    pass
+        except Exception:
+            backups = []
+
         common_data = get_common_template_data()
-        return render_template('settings.html', settings=current_settings, hosts=hosts, **common_data)
+        return render_template('settings.html', settings=current_settings, hosts=hosts, backups=backups, **common_data)
+
+    # --- DB Backup/Restore ---
+    @flask_app.route('/admin/db/backup', methods=['POST'])
+    @login_required
+    def backup_db_route():
+        try:
+            zip_path = backup_manager.create_backup_file()
+            if not zip_path or not os.path.isfile(zip_path):
+                flash('Не удалось создать бэкап БД.', 'danger')
+                return redirect(request.referrer or url_for('settings_page', tab='panel'))
+            # Отдаём файл на скачивание
+            return send_file(str(zip_path), as_attachment=True, download_name=os.path.basename(zip_path))
+        except Exception as e:
+            logger.error(f"DB backup error: {e}")
+            flash('Ошибка при создании бэкапа.', 'danger')
+            return redirect(request.referrer or url_for('settings_page', tab='panel'))
+
+    @flask_app.route('/admin/db/restore', methods=['POST'])
+    @login_required
+    def restore_db_route():
+        try:
+            # Вариант 1: восстановление из имеющегося архива
+            existing = (request.form.get('existing_backup') or '').strip()
+            ok = False
+            if existing:
+                # Разрешаем только файлы внутри BACKUPS_DIR
+                base = backup_manager.BACKUPS_DIR
+                candidate = (base / existing).resolve()
+                if str(candidate).startswith(str(base.resolve())) and os.path.isfile(candidate):
+                    ok = backup_manager.restore_from_file(candidate)
+                else:
+                    flash('Выбранный бэкап не найден.', 'danger')
+                    return redirect(request.referrer or url_for('settings_page', tab='panel'))
+            else:
+                # Вариант 2: загрузка собственного файла
+                file = request.files.get('db_file')
+                if not file or file.filename == '':
+                    flash('Файл для восстановления не выбран.', 'warning')
+                    return redirect(request.referrer or url_for('settings_page', tab='panel'))
+                filename = file.filename.lower()
+                if not (filename.endswith('.zip') or filename.endswith('.db')):
+                    flash('Поддерживаются только файлы .zip или .db', 'warning')
+                    return redirect(request.referrer or url_for('settings_page', tab='panel'))
+                ts = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+                dest_dir = backup_manager.BACKUPS_DIR
+                try:
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                dest_path = dest_dir / f"uploaded-{ts}-{os.path.basename(filename)}"
+                file.save(dest_path)
+                ok = backup_manager.restore_from_file(dest_path)
+            if ok:
+                flash('Восстановление выполнено успешно.', 'success')
+            else:
+                flash('Восстановление не удалось. Проверьте файл и повторите.', 'danger')
+            return redirect(request.referrer or url_for('settings_page', tab='panel'))
+        except Exception as e:
+            logger.error(f"DB restore error: {e}", exc_info=True)
+            flash('Ошибка при восстановлении БД.', 'danger')
+            return redirect(request.referrer or url_for('settings_page', tab='panel'))
 
     @flask_app.route('/update-host-subscription', methods=['POST'])
     @login_required
