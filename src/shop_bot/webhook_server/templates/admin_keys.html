@@ -27,7 +27,7 @@
           <select class="form-select rounded-3 select-soft" id="host_name" name="host_name" required>
             <option value="" selected disabled>Выберите хост...</option>
             {% for h in hosts %}
-            <option value="{{ h.host_name }}" data-inbound="{{ h.inbound }}">{{ h.host_name }}</option>
+            <option value="{{ h.host_name }}" data-inbound="{{ h.host_inbound_id }}">{{ h.host_name }}</option>
             {% endfor %}
           </select>
         </div>
