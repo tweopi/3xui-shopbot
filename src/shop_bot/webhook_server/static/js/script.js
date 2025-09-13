@@ -18,6 +18,15 @@ document.addEventListener('DOMContentLoaded', function () {
             new bootstrap.Toast(el, { delay: Math.max(2000, delay||4000), autohide: true }).show();
         }catch(_){ }
     }
+    // HTML safety guard: avoid injecting full HTML documents (error pages) into partial containers
+    function isFullDocument(html){
+        if (!html) return false;
+        const s = String(html).trim().slice(0, 512).toLowerCase();
+        if (s.startsWith('<!doctype') || s.startsWith('<html')) return true;
+        // Heuristic for common proxy error pages
+        if (s.includes('<head') && s.includes('<title') && s.includes('</html>')) return true;
+        return false;
+    }
     // Global partial refresh by container id
     window.refreshContainerById = async function(id){
         const node = document.getElementById(id);
@@ -30,6 +39,10 @@ document.addEventListener('DOMContentLoaded', function () {
             if (resp.status === 401 || resp.status === 403) { window.location.href = '/login'; return; }
             if (!resp.ok) return;
             const html = await resp.text();
+            if (isFullDocument(html)) {
+                try { window.showToast('warning', 'Не удалось обновить блок: получена HTML-страница сервера.'); } catch(_){ }
+                return;
+            }
             if (html && html !== node.innerHTML) {
                 // lock height to avoid layout shift
                 const prevH = node.offsetHeight;
@@ -517,6 +530,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (resp.status === 401 || resp.status === 403) { window.location.href = '/login'; return; }
                     if (!resp.ok) return;
                     const html = await resp.text();
+                    if (isFullDocument(html)) {
+                        try { window.showToast('warning', 'Автообновление пропущено: получена HTML-страница сервера.'); } catch(_){ }
+                        return;
+                    }
                     if (html && html !== node.innerHTML) {
                         const prevH = node.offsetHeight;
                         if (prevH > 0) node.style.minHeight = prevH + 'px';
