@@ -563,10 +563,30 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (h > 0) rightCol.style.minHeight = h + 'px';
             }
             sections.forEach(sec => {
-                if ('#' + sec.id === hash) {
+                const isTarget = ('#' + sec.id === hash);
+                if (isTarget) {
+                    // Показать секцию и восстановить required для элементов, где он был
                     sec.classList.remove('is-hidden');
+                    try {
+                        sec.querySelectorAll('input, select, textarea').forEach(el => {
+                            const wasRequired = el.getAttribute('data-was-required');
+                            if (wasRequired === '1') {
+                                el.setAttribute('required', '');
+                                el.removeAttribute('data-was-required');
+                            }
+                        });
+                    } catch (_) { /* noop */ }
                 } else {
+                    // Скрыть секцию и временно снять required, чтобы браузер не требовал заполнения
                     sec.classList.add('is-hidden');
+                    try {
+                        sec.querySelectorAll('input, select, textarea').forEach(el => {
+                            if (el.hasAttribute('required')) {
+                                el.setAttribute('data-was-required', '1');
+                                el.removeAttribute('required');
+                            }
+                        });
+                    } catch (_) { /* noop */ }
                 }
             });
             links.forEach(a => {
@@ -577,6 +597,15 @@ document.addEventListener('DOMContentLoaded', function () {
             const anyVisible = sections.some(sec => !sec.classList.contains('is-hidden'));
             if (!anyVisible && sections.length) {
                 sections[0].classList.remove('is-hidden');
+                try {
+                    sections[0].querySelectorAll('input, select, textarea').forEach(el => {
+                        const wasRequired = el.getAttribute('data-was-required');
+                        if (wasRequired === '1') {
+                            el.setAttribute('required', '');
+                            el.removeAttribute('data-was-required');
+                        }
+                    });
+                } catch (_) { /* noop */ }
             }
             // снять фиксацию высоты после завершения анимации скрытия/показа
             if (rightCol) setTimeout(() => { rightCol.style.minHeight = ''; }, 260);
