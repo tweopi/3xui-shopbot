@@ -31,7 +31,7 @@ class BotController:
 
     async def _start_polling(self):
         self._is_running = True
-        logger.info("Запущен опрос Telegram (polling).")
+        logger.info("Запущен опрос Telegram (Основной-бот).")
         try:
             await self._dp.start_polling(self._bot)
         except asyncio.CancelledError:

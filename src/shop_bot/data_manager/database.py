@@ -1282,8 +1282,16 @@ def get_total_spent_sum() -> float:
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT SUM(total_spent) FROM users")
-            return cursor.fetchone()[0] or 0.0
+            # Consider only completed/paid transactions when summing total spent
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(amount_rub), 0.0)
+                FROM transactions
+                WHERE LOWER(COALESCE(status, '')) IN ('paid', 'completed', 'success')
+                """
+            )
+            val = cursor.fetchone()
+            return (val[0] if val else 0.0) or 0.0
     except sqlite3.Error as e:
         logging.error(f"Failed to get total spent sum: {e}")
         return 0.0
