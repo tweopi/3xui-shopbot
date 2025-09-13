@@ -241,3 +241,4 @@ echo -e "3. Нажмите 'Сохранить' и затем 'Запустит�
 echo -e "\n${CYAN}Не забудьте указать URL для вебхуков в YooKassa:${NC}"
 echo -e "  - ${YELLOW}https://${DOMAIN}:${YOOKASSA_PORT}/yookassa-webhook${NC}"
 echo -e "\n"
+
