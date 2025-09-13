@@ -71,6 +71,7 @@ install_package "docker-compose" "docker-compose"
 install_package "nginx" "nginx"
 install_package "curl" "curl"
 install_package "certbot" "certbot python3-certbot-nginx"
+install_package "dig" "dnsutils"
 
 for service in docker nginx; do
     if ! sudo systemctl is-active --quiet $service; then
@@ -97,15 +98,68 @@ if [ -z "$USER_INPUT_DOMAIN" ]; then
     exit 1
 fi
 
-DOMAIN=$(echo "$USER_INPUT_DOMAIN" | sed -e 's%^https\?://%%' -e 's%/.*$%%')
+# Санитизация домена: убрать схему/путь, оставить только ASCII-символы доменного имени
+DOMAIN=$(echo "$USER_INPUT_DOMAIN" \
+    | sed -e 's%^https\?://%%' -e 's%/.*$%%' \
+    | tr -cd 'A-Za-z0-9.-' \
+    | tr '[:upper:]' '[:lower:]')
 
 read_input "Введите ваш email (для регистрации SSL-сертификатов Let's Encrypt): " EMAIL
 
 echo -e "${GREEN}✔ Домен для работы: ${DOMAIN}${NC}"
-SERVER_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
-DOMAIN_IP=$(dig +short $DOMAIN @8.8.8.8 | tail -n1)
-echo -e "${YELLOW}IP вашего сервера: $SERVER_IP${NC}"
-echo -e "${YELLOW}IP, на который указывает домен '$DOMAIN': $DOMAIN_IP${NC}"
+
+# Получение публичного IPv4 сервера без вывода HTML
+ipv4_re='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+get_server_ip(){
+    for url in \
+        "https://api.ipify.org" \
+        "https://ifconfig.co/ip" \
+        "https://ipv4.icanhazip.com"; do
+        ip=$(curl -fsS "$url" 2>/dev/null | tr -d '\r\n\t ')
+        if [[ $ip =~ $ipv4_re ]]; then echo "$ip"; return 0; fi
+    done
+    # Fallback: локальная информация (может вернуть приватный IP)
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [[ $ip =~ $ipv4_re ]]; then echo "$ip"; else echo ""; fi
+}
+
+# Разрешение IPv4 домена без обязательного dig
+resolve_domain_ip(){
+    # 1) getent hosts (glibc)
+    ip=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -n1)
+    if [[ $ip =~ $ipv4_re ]]; then echo "$ip"; return 0; fi
+    # 2) dig, если доступен
+    if command -v dig >/dev/null 2>&1; then
+        ip=$(dig +short A "$DOMAIN" 2>/dev/null | grep -E "$ipv4_re" | head -n1)
+        if [[ $ip =~ $ipv4_re ]]; then echo "$ip"; return 0; fi
+    fi
+    # 3) nslookup, если доступен
+    if command -v nslookup >/dev/null 2>&1; then
+        ip=$(nslookup -type=A "$DOMAIN" 2>/dev/null | awk '/^Address: /{print $2; exit}')
+        if [[ $ip =~ $ipv4_re ]]; then echo "$ip"; return 0; fi
+    fi
+    # 4) ping -c1 (как крайний случай)
+    if command -v ping >/dev/null 2>&1; then
+        ip=$(ping -4 -c1 -W1 "$DOMAIN" 2>/dev/null | sed -n 's/.*(\([0-9.]*\)).*/\1/p' | head -n1)
+        if [[ $ip =~ $ipv4_re ]]; then echo "$ip"; return 0; fi
+    fi
+    echo ""
+}
+
+SERVER_IP=$(get_server_ip)
+DOMAIN_IP=$(resolve_domain_ip)
+
+if [ -n "$SERVER_IP" ]; then
+    echo -e "${YELLOW}IP вашего сервера: $SERVER_IP${NC}"
+else
+    echo -e "${YELLOW}IP вашего сервера: (не удалось определить)${NC}"
+fi
+
+if [ -n "$DOMAIN_IP" ]; then
+    echo -e "${YELLOW}IP, на который указывает домен '$DOMAIN': $DOMAIN_IP${NC}"
+else
+    echo -e "${YELLOW}IP, на который указывает домен '$DOMAIN': (не удалось определить)${NC}"
+fi
 
 if [ "$SERVER_IP" != "$DOMAIN_IP" ]; then
     echo -e "${RED}ВНИМАНИЕ: DNS-запись для домена $DOMAIN не указывает на IP-адрес этого сервера!${NC}"
