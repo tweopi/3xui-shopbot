@@ -18,11 +18,11 @@ def login_to_host(host_url: str, username: str, password: str, inbound_id: int) 
         target_inbound = next((inbound for inbound in inbounds if inbound.id == inbound_id), None)
         
         if target_inbound is None:
-            logger.error(f"Inbound with ID '{inbound_id}' not found on host '{host_url}'")
+            logger.error(f"Inbound с ID '{inbound_id}' не найден на хосте '{host_url}'")
             return None, None
         return api, target_inbound
     except Exception as e:
-        logger.error(f"Login or inbound retrieval failed for host '{host_url}': {e}", exc_info=True)
+        logger.error(f"Не удалось выполнить вход или получить inbound для хоста '{host_url}': {e}", exc_info=True)
         return None, None
 
 def get_connection_string(inbound: Inbound, user_uuid: str, host_url: str, remark: str) -> str | None:
@@ -177,13 +177,13 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
         return client_uuid, new_expiry_ms, client_sub_token
 
     except Exception as e:
-        logger.error(f"Error in update_or_create_client_on_panel: {e}", exc_info=True)
+        logger.error(f"Ошибка в update_or_create_client_on_panel: {e}", exc_info=True)
         return None, None, None
 
 async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: int | None = None, expiry_timestamp_ms: int | None = None) -> Dict | None:
     host_data = get_host(host_name)
     if not host_data:
-        logger.error(f"Workflow failed: Host '{host_name}' not found in the database.")
+        logger.error(f"Сбой рабочего процесса: Хост '{host_name}' не найден в базе данных.")
         return None
 
     api, inbound = login_to_host(
@@ -193,7 +193,7 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
         inbound_id=host_data['host_inbound_id']
     )
     if not api or not inbound:
-        logger.error(f"Workflow failed: Could not log in or find inbound on host '{host_name}'.")
+        logger.error(f"Сбой рабочего процесса: Не удалось войти или найти inbound на хосте '{host_name}'.")
         return None
         
     # Prefer exact expiry when provided (e.g., switching hosts), otherwise add days (purchase/extend/trial)
@@ -202,12 +202,12 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
     )
 
     if not client_uuid:
-        logger.error(f"Workflow failed: Could not create/update client '{email}' on host '{host_name}'.")
+        logger.error(f"Сбой рабочего процесса: Не удалось создать/обновить клиента '{email}' на хосте '{host_name}'.")
         return None
     
     connection_string = get_subscription_link(client_uuid, host_data['host_url'], host_name, sub_token=client_sub_token)
     
-    logger.info(f"Successfully processed key for '{email}' on host '{host_name}'.")
+    logger.info(f"Успешно обработан ключ для '{email}' на хосте '{host_name}'.")
     
     
     return {
@@ -221,12 +221,12 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
 async def get_key_details_from_host(key_data: dict) -> dict | None:
     host_name = key_data.get('host_name')
     if not host_name:
-        logger.error(f"Could not get key details: host_name is missing for key_id {key_data.get('key_id')}")
+        logger.error(f"Не удалось получить данные ключа: отсутствует host_name для key_id {key_data.get('key_id')}")
         return None
 
     host_db_data = get_host(host_name)
     if not host_db_data:
-        logger.error(f"Could not get key details: Host '{host_name}' not found in the database.")
+        logger.error(f"Не удалось получить данные ключа: хост '{host_name}' не найден в базе данных.")
         return None
 
     api, inbound = login_to_host(
@@ -264,7 +264,7 @@ async def get_key_details_from_host(key_data: dict) -> dict | None:
 async def delete_client_on_host(host_name: str, client_email: str) -> bool:
     host_data = get_host(host_name)
     if not host_data:
-        logger.error(f"Cannot delete client: Host '{host_name}' not found.")
+        logger.error(f"Не удалось удалить клиента: хост '{host_name}' не найден.")
         return False
 
     api, inbound = login_to_host(
@@ -275,20 +275,19 @@ async def delete_client_on_host(host_name: str, client_email: str) -> bool:
     )
 
     if not api or not inbound:
-        logger.error(f"Cannot delete client: Login or inbound lookup failed for host '{host_name}'.")
+        logger.error(f"Не удалось удалить клиента: ошибка входа или поиска inbound для хоста '{host_name}'.")
         return False
         
     try:
         client_to_delete = get_key_by_email(client_email)
         if client_to_delete:
             api.client.delete(inbound.id, client_to_delete['xui_client_uuid'])
-            logger.info(f"Successfully deleted client '{client_to_delete['xui_client_uuid']}' from host '{host_name}'.")
+            logger.info(f"Клиент '{client_email}' успешно удалён с хоста '{host_name}'.")
             return True
         else:
-            logger.warning(f"Client '{client_to_delete['xui_client_uuid']}' not found on host '{host_name}' for deletion (already gone).")
+            logger.warning(f"Клиент с email '{client_email}' не найден на хосте '{host_name}' для удаления (возможно, уже удалён).")
             return True
             
     except Exception as e:
-        logger.error(f"Failed to delete client '{client_to_delete['xui_client_uuid']}' from host '{host_name}': {e}", exc_info=True)
+        logger.error(f"Не удалось удалить клиента '{client_email}' с хоста '{host_name}': {e}", exc_info=True)
         return False
-            

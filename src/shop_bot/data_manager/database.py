@@ -1245,7 +1245,7 @@ def set_terms_agreed(telegram_id: int):
             cursor = conn.cursor()
             cursor.execute("UPDATE users SET agreed_to_terms = 1 WHERE telegram_id = ?", (telegram_id,))
             conn.commit()
-            logging.info(f"User {telegram_id} has agreed to terms.")
+            logging.info(f"Пользователь {telegram_id} согласился с условиями.")
     except sqlite3.Error as e:
         logging.error(f"Failed to set terms agreed for user {telegram_id}: {e}")
 
