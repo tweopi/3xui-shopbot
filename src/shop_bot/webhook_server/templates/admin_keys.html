@@ -345,7 +345,8 @@
         const d = await res.json();
         const items = (d && d.ok && d.items) ? d.items : [];
         const saved = (JSON.parse(localStorage.getItem('admin_keys_form')||'{}')||{}).plan_select;
-        planSel.innerHTML = '<option value="">— Не выбран —</option>' + items.map(p => `<option value="${p.months}" data-price="${p.price||0}">${p.plan_name} (${p.months} мес.) — ${Number(p.price||0).toFixed(0)} RUB</option>`).join('');
+        // Важно: value должен быть уникальным -> используем plan_id, а months/price кладём в data-атрибуты
+        planSel.innerHTML = '<option value="">— Не выбран —</option>' + items.map(p => `<option value="${p.plan_id}" data-months="${p.months}" data-price="${p.price||0}">${p.plan_name} (${p.months} мес.) — ${Number(p.price||0).toFixed(0)} RUB</option>`).join('');
         planSel.disabled = false;
         // восстановим выбранный тариф, если есть
         if (saved) {
@@ -353,7 +354,7 @@
           const opt = planSel.options[planSel.selectedIndex];
           const price = opt ? Number(opt.getAttribute('data-price')||0) : 0;
           if (priceEl) priceEl.textContent = saved ? `${price.toFixed(0)} RUB` : '— RUB';
-          const months = Number(saved || 0);
+          const months = opt ? Number(opt.getAttribute('data-months')||0) : 0;
           if (months > 0) setExpiryDays(months * 30);
         } else if (priceEl) { priceEl.textContent = '— RUB'; }
         // обновим мягкий селектор тарифа
@@ -472,9 +473,9 @@
     // Обработчики для тарифов/дней/пресетов
     if (planSel) {
       planSel.addEventListener('change', () => {
-        const months = Number(planSel.value || 0);
-        if (months > 0) setExpiryDays(months * 30);
         const opt = planSel.options[planSel.selectedIndex];
+        const months = opt ? Number(opt.getAttribute('data-months')||0) : 0;
+        if (months > 0) setExpiryDays(months * 30);
         const price = opt ? Number(opt.getAttribute('data-price')||0) : 0;
         if (priceEl) priceEl.textContent = `${price.toFixed(0)} RUB`;
       });
