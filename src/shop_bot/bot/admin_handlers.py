@@ -1064,6 +1064,36 @@ def get_admin_router() -> Router:
             return
         host = key.get('host_name')
         email = key.get('key_email')
+        # Проверим, нет ли у пользователя другого ключа с таким же email; если есть — сгенерируем уникальный email
+        try:
+            user_id = int(key.get('user_id'))
+        except Exception:
+            user_id = None
+        target_email = email
+        if user_id is not None and email:
+            try:
+                # Если в БД уже есть другой ключ с этим email и не наш текущий key_id — будем подбирать новый
+                existing = get_key_by_email(email)
+                if existing and int(existing.get('key_id')) != int(key_id):
+                    # Генерируем новый email с числовыми суффиксами -1, -2, ...
+                    try:
+                        local, domain = email.split('@', 1)
+                    except Exception:
+                        local, domain = (f"key{key_id}", "bot.local")
+                    base_local = re.sub(r"[^a-zA-Z0-9._-]", "_", local).strip("_") or f"key{key_id}"
+                    attempt = 1
+                    while True:
+                        candidate_email = f"{base_local}-{attempt}@{domain}"
+                        if not get_key_by_email(candidate_email):
+                            target_email = candidate_email
+                            break
+                        attempt += 1
+                        if attempt > 100:
+                            # страховка: уникализируем таймштампом
+                            target_email = f"{base_local}-{int(time.time())}@{domain}"
+                            break
+            except Exception:
+                pass
         ok_host = True
         if host and email:
             try:
@@ -1213,7 +1243,7 @@ def get_admin_router() -> Router:
             # Создаём/обновляем на новом хосте с точным сроком
             result = await create_or_update_key_on_host(
                 new_host_name,
-                email,
+                target_email,
                 days_to_add=None,
                 expiry_timestamp_ms=expiry_timestamp_ms_exact
             )
@@ -1230,6 +1260,12 @@ def get_admin_router() -> Router:
             except Exception:
                 pass
 
+            # Если email сменился для уникальности — сохраним его в БД
+            if target_email != email:
+                try:
+                    update_key_email(key_id, target_email)
+                except Exception:
+                    pass
             # Обновляем БД новым хостом, UUID и сроком
             update_key_host_and_info(
                 key_id=key_id,
