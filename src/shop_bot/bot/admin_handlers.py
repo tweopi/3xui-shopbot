@@ -22,6 +22,7 @@ from shop_bot.data_manager.database import (
     get_key_by_id,
     update_key_email,
     update_key_host,
+    update_key_host_and_info,
     create_gift_key,
     add_new_key,
     get_key_by_email,
@@ -1063,6 +1064,36 @@ def get_admin_router() -> Router:
             return
         host = key.get('host_name')
         email = key.get('key_email')
+        # Проверим, нет ли у пользователя другого ключа с таким же email; если есть — сгенерируем уникальный email
+        try:
+            user_id = int(key.get('user_id'))
+        except Exception:
+            user_id = None
+        target_email = email
+        if user_id is not None and email:
+            try:
+                # Если в БД уже есть другой ключ с этим email и не наш текущий key_id — будем подбирать новый
+                existing = get_key_by_email(email)
+                if existing and int(existing.get('key_id')) != int(key_id):
+                    # Генерируем новый email с числовыми суффиксами -1, -2, ...
+                    try:
+                        local, domain = email.split('@', 1)
+                    except Exception:
+                        local, domain = (f"key{key_id}", "bot.local")
+                    base_local = re.sub(r"[^a-zA-Z0-9._-]", "_", local).strip("_") or f"key{key_id}"
+                    attempt = 1
+                    while True:
+                        candidate_email = f"{base_local}-{attempt}@{domain}"
+                        if not get_key_by_email(candidate_email):
+                            target_email = candidate_email
+                            break
+                        attempt += 1
+                        if attempt > 100:
+                            # страховка: уникализируем таймштампом
+                            target_email = f"{base_local}-{int(time.time())}@{domain}"
+                            break
+            except Exception:
+                pass
         ok_host = True
         if host and email:
             try:
@@ -1142,6 +1173,7 @@ def get_admin_router() -> Router:
 
     class AdminEditKeyHost(StatesGroup):
         waiting_for_host = State()
+        picking_host = State()
 
     @admin_router.callback_query(F.data.startswith("admin_key_edit_host_"))
     async def admin_key_edit_host_start(callback: types.CallbackQuery, state: FSMContext):
@@ -1155,27 +1187,160 @@ def get_admin_router() -> Router:
             await callback.message.answer("❌ Неверный формат key_id")
             return
         await state.update_data(edit_key_id=key_id)
-        await state.set_state(AdminEditKeyHost.waiting_for_host)
-        await callback.message.edit_text(
-            f"Введите новое имя сервера (host) для ключа #{key_id}",
-            reply_markup=keyboards.create_admin_cancel_keyboard()
-        )
+        hosts = get_all_hosts() or []
+        await state.set_state(AdminEditKeyHost.picking_host)
+        try:
+            await callback.message.edit_text(
+                f"🌍 Выберите новый сервер для ключа #{key_id}:",
+                reply_markup=keyboards.create_admin_hosts_pick_keyboard(hosts, action="editkey")
+            )
+        except Exception as e:
+            logger.debug(f"edit_text failed in editkey host pick for key #{key_id}: {e}")
+            await callback.message.answer(
+                f"🌍 Выберите новый сервер для ключа #{key_id}:",
+                reply_markup=keyboards.create_admin_hosts_pick_keyboard(hosts, action="editkey")
+            )
 
-    @admin_router.message(AdminEditKeyHost.waiting_for_host)
-    async def admin_key_edit_host_commit(message: types.Message, state: FSMContext):
-        if not is_admin(message.from_user.id):
+    @admin_router.callback_query(AdminEditKeyHost.picking_host, F.data.startswith("admin_editkey_pick_host_"))
+    async def admin_editkey_pick_host(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
             return
+        await callback.answer()
         data = await state.get_data()
-        key_id = int(data.get('edit_key_id'))
-        new_host = (message.text or '').strip()
-        if not new_host:
-            await message.answer("❌ Введите корректное имя сервера")
+        try:
+            key_id = int(data.get('edit_key_id'))
+        except Exception:
+            await state.clear()
+            await callback.message.answer("❌ Не удалось определить ключ")
             return
-        ok = update_key_host(key_id, new_host)
-        if ok:
-            await message.answer("✅ Сервер обновлён")
-        else:
-            await message.answer("❌ Не удалось обновить сервер")
+        new_host_name = callback.data.split("admin_editkey_pick_host_")[-1]
+
+        key = get_key_by_id(key_id)
+        if not key:
+            await state.clear()
+            await callback.message.answer("❌ Ключ не найден")
+            return
+        old_host = key.get('host_name') or ''
+        if new_host_name == old_host:
+            await callback.answer("Это уже текущий сервер.", show_alert=True)
+            return
+
+        # Точный срок действия из БД в мс
+        try:
+            expiry_dt = datetime.fromisoformat(key.get('expiry_date'))
+            expiry_timestamp_ms_exact = int(expiry_dt.timestamp() * 1000)
+        except Exception:
+            expiry_timestamp_ms_exact = int(time.time() * 1000) + 24 * 3600 * 1000
+
+        email = key.get('key_email')
+        # Сообщение о прогрессе
+        try:
+            await callback.message.edit_text(f"⏳ Переношу ключ на сервер \"{new_host_name}\"…")
+        except Exception:
+            pass
+        try:
+            # Создаём/обновляем на новом хосте с точным сроком
+            result = await create_or_update_key_on_host(
+                new_host_name,
+                target_email,
+                days_to_add=None,
+                expiry_timestamp_ms=expiry_timestamp_ms_exact
+            )
+            if not result:
+                await callback.message.edit_text(
+                    f"❌ Не удалось перенести ключ на сервер \"{new_host_name}\". Попробуйте позже."
+                )
+                return
+
+            # Пытаемся удалить на старом хосте
+            try:
+                if old_host:
+                    await delete_client_on_host(old_host, email)
+            except Exception:
+                pass
+
+            # Если email сменился для уникальности — сохраним его в БД
+            if target_email != email:
+                try:
+                    update_key_email(key_id, target_email)
+                except Exception:
+                    pass
+            # Обновляем БД новым хостом, UUID и сроком
+            update_key_host_and_info(
+                key_id=key_id,
+                new_host_name=new_host_name,
+                new_xui_uuid=result['client_uuid'],
+                new_expiry_ms=result['expiry_timestamp_ms']
+            )
+
+            # Показать обновлённую карточку ключа
+            updated_key = get_key_by_id(key_id) or key
+            text = (
+                f"🔑 <b>Ключ #{key_id}</b>\n"
+                f"Хост: {updated_key.get('host_name') or '—'}\n"
+                f"Email: {updated_key.get('key_email') or '—'}\n"
+                f"Истекает: {updated_key.get('expiry_date') or '—'}\n"
+            )
+            try:
+                await callback.message.edit_text(
+                    text,
+                    reply_markup=keyboards.create_admin_key_actions_keyboard(
+                        key_id, int(updated_key.get('user_id')) if updated_key and updated_key.get('user_id') else None
+                    )
+                )
+            except Exception:
+                await callback.message.answer(
+                    text,
+                    reply_markup=keyboards.create_admin_key_actions_keyboard(
+                        key_id, int(updated_key.get('user_id')) if updated_key and updated_key.get('user_id') else None
+                    )
+                )
+        except Exception as e:
+            logger.error(f"Admin move key #{key_id} to host {new_host_name} failed: {e}", exc_info=True)
+            await callback.message.edit_text("❌ Произошла ошибка при переносе ключа. Попробуйте позже.")
+        finally:
+            await state.clear()
+
+    @admin_router.callback_query(AdminEditKeyHost.picking_host, F.data == "admin_editkey_back_to_users")
+    async def admin_editkey_back(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        data = await state.get_data()
+        try:
+            key_id = int(data.get('edit_key_id'))
+        except Exception:
+            await state.clear()
+            await show_admin_menu(callback.message, edit_message=True)
+            return
+        key = get_key_by_id(key_id)
+        if not key:
+            await state.clear()
+            await callback.message.answer("❌ Ключ не найден")
+            return
+        text = (
+            f"🔑 <b>Ключ #{key_id}</b>\n"
+            f"Хост: {key.get('host_name') or '—'}\n"
+            f"Email: {key.get('key_email') or '—'}\n"
+            f"Истекает: {key.get('expiry_date') or '—'}\n"
+        )
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=keyboards.create_admin_key_actions_keyboard(
+                    key_id, int(key.get('user_id')) if key and key.get('user_id') else None
+                )
+            )
+        except Exception:
+            await callback.message.answer(
+                text,
+                reply_markup=keyboards.create_admin_key_actions_keyboard(
+                    key_id, int(key.get('user_id')) if key and key.get('user_id') else None
+                )
+            )
+        # остаёмся без состояния
         await state.clear()
 
     # --- Начисление реф. баланса: удалено ---
