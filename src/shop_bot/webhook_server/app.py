@@ -27,7 +27,7 @@ from shop_bot.support_bot_controller import SupportBotController
 from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager import backup_manager
 from shop_bot.data_manager.database import (
-    get_all_settings, update_setting, get_all_hosts, get_plans_for_host,
+    update_setting, get_all_hosts, get_plans_for_host,
     create_host, delete_host, create_plan, delete_plan, update_plan, get_user_count,
     get_total_keys_count, get_total_spent_sum, get_daily_stats_for_charts,
     get_recent_transactions, get_paginated_transactions, get_all_users, get_user_keys,
@@ -114,9 +114,23 @@ def create_webhook_app(bot_controller_instance):
             return f(*args, **kwargs)
         return decorated_function
 
+    def _get_all_settings_safe() -> dict:
+        # Локальная функция: собрать настройки через get_setting по известным ключам,
+        # чтобы не зависеть от наличия get_all_settings() в database.py
+        data = {}
+        try:
+            for k in ALL_SETTINGS_KEYS:
+                try:
+                    data[k] = get_setting(k)
+                except Exception:
+                    data[k] = None
+        except Exception:
+            pass
+        return data
+
     @flask_app.route('/login', methods=['GET', 'POST'])
     def login_page():
-        settings = get_all_settings()
+        settings = _get_all_settings_safe()
         if request.method == 'POST':
             if request.form.get('username') == settings.get("panel_login") and \
                request.form.get('password') == settings.get("panel_password"):
@@ -138,7 +152,7 @@ def create_webhook_app(bot_controller_instance):
     def get_common_template_data():
         bot_status = _bot_controller.get_status()
         support_bot_status = _support_bot_controller.get_status()
-        settings = get_all_settings()
+        settings = _get_all_settings_safe()
         required_for_start = ['telegram_bot_token', 'telegram_bot_username', 'admin_telegram_id']
         required_support_for_start = ['support_bot_token', 'support_bot_username', 'admin_telegram_id']
         all_settings_ok = all(settings.get(key) for key in required_for_start)
