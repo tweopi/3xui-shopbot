@@ -48,7 +48,7 @@ from shop_bot.data_manager.database import (
     get_key_by_email, add_to_balance,
     add_to_referral_balance_all, get_referral_balance_all,
     get_referral_balance,
-    is_admin,
+    get_admin_ids,
     set_referral_start_bonus_received,
 )
 
@@ -63,6 +63,13 @@ ADMIN_ID = None  # устаревшее: используйте is_admin()
 CRYPTO_BOT_TOKEN = get_setting("cryptobot_token")
 
 logger = logging.getLogger(__name__)
+
+# Локальная обёртка, чтобы не зависеть от наличия is_admin() в database.py
+def is_admin(user_id: int) -> bool:
+    try:
+        return int(user_id) in get_admin_ids()
+    except Exception:
+        return False
 
 class KeyPurchase(StatesGroup):
     waiting_for_host_selection = State()
