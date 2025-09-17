@@ -6,6 +6,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from shop_bot.data_manager import database
+from shop_bot.data_manager.database import get_admin_ids
 from shop_bot.support_bot.handlers import get_support_router
 
 logger = logging.getLogger(__name__)
@@ -54,45 +55,7 @@ class SupportBotController:
         bot_username = database.get_setting("support_bot_username")
         # допускаем отсутствие одиночного admin_telegram_id, если настроены admin_telegram_ids
         admin_id = database.get_setting("admin_telegram_id")
-
-        # Локально считаем список админов из настроек, чтобы не зависеть от наличия get_admin_ids
-        def _get_admin_ids_from_settings() -> set[int]:
-            ids: set[int] = set()
-            try:
-                if admin_id:
-                    try:
-                        ids.add(int(admin_id))
-                    except Exception:
-                        pass
-                multi_raw = database.get_setting("admin_telegram_ids")
-                if multi_raw:
-                    s = str(multi_raw).strip()
-                    # JSON-массив
-                    try:
-                        import json as _json
-                        arr = _json.loads(s)
-                        if isinstance(arr, list):
-                            for v in arr:
-                                try:
-                                    ids.add(int(v))
-                                except Exception:
-                                    pass
-                            return ids
-                    except Exception:
-                        pass
-                    # Строка с разделителями
-                    import re as _re
-                    parts = [p for p in _re.split(r"[\s,]+", s) if p]
-                    for p in parts:
-                        try:
-                            ids.add(int(p))
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-            return ids
-
-        admin_ids = _get_admin_ids_from_settings()
+        admin_ids = get_admin_ids()
 
         if not all([token, bot_username]) or (not admin_id and not admin_ids):
             return {

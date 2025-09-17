@@ -48,6 +48,7 @@ from shop_bot.data_manager.database import (
     get_key_by_email, add_to_balance,
     add_to_referral_balance_all, get_referral_balance_all,
     get_referral_balance,
+    is_admin,
     set_referral_start_bonus_received,
 )
 
@@ -62,50 +63,6 @@ ADMIN_ID = None  # устаревшее: используйте is_admin()
 CRYPTO_BOT_TOKEN = get_setting("cryptobot_token")
 
 logger = logging.getLogger(__name__)
-
-# Локальные функции, чтобы не зависеть от наличия get_admin_ids()/is_admin() в database.py
-def get_admin_ids_from_settings() -> set[int]:
-    ids: set[int] = set()
-    try:
-        single = get_setting("admin_telegram_id")
-        if single:
-            try:
-                ids.add(int(single))
-            except Exception:
-                pass
-        multi_raw = get_setting("admin_telegram_ids")
-        if multi_raw:
-            s = str(multi_raw).strip()
-            # Попробуем как JSON-массив
-            try:
-                import json as _json
-                arr = _json.loads(s)
-                if isinstance(arr, list):
-                    for v in arr:
-                        try:
-                            ids.add(int(v))
-                        except Exception:
-                            pass
-                    return ids
-            except Exception:
-                pass
-            # Иначе как строка с разделителями (запятая/пробел)
-            import re as _re
-            parts = [p for p in _re.split(r"[\s,]+", s) if p]
-            for p in parts:
-                try:
-                    ids.add(int(p))
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    return ids
-
-def is_admin(user_id: int) -> bool:
-    try:
-        return int(user_id) in get_admin_ids_from_settings()
-    except Exception:
-        return False
 
 class KeyPurchase(StatesGroup):
     waiting_for_host_selection = State()

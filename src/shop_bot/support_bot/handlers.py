@@ -18,6 +18,8 @@ from shop_bot.data_manager.database import (
     get_ticket_by_thread,
     update_ticket_subject,
     delete_ticket,
+    is_admin,
+    get_admin_ids,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,51 +79,8 @@ def get_support_router() -> Router:
         ]
         return types.InlineKeyboardMarkup(inline_keyboard=inline_kb)
 
-    def _get_admin_ids_from_settings() -> set[int]:
-        ids: set[int] = set()
-        try:
-            single = get_setting("admin_telegram_id")
-            if single:
-                try:
-                    ids.add(int(single))
-                except Exception:
-                    pass
-            multi_raw = get_setting("admin_telegram_ids")
-            if multi_raw:
-                s = str(multi_raw).strip()
-                # JSON-массив
-                try:
-                    import json as _json
-                    arr = _json.loads(s)
-                    if isinstance(arr, list):
-                        for v in arr:
-                            try:
-                                ids.add(int(v))
-                            except Exception:
-                                pass
-                        return ids
-                except Exception:
-                    pass
-                # Строка с разделителями
-                import re as _re
-                parts = [p for p in _re.split(r"[\s,]+", s) if p]
-                for p in parts:
-                    try:
-                        ids.add(int(p))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        return ids
-
-    def _is_admin_by_settings(user_id: int) -> bool:
-        try:
-            return int(user_id) in _get_admin_ids_from_settings()
-        except Exception:
-            return False
-
     async def _is_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
-        is_admin_by_setting = _is_admin_by_settings(user_id)
+        is_admin_by_setting = is_admin(user_id)
         is_admin_in_chat = False
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
@@ -263,7 +222,7 @@ def get_support_router() -> Router:
             )
         # Уведомить всех администраторов
         try:
-            for aid in _get_admin_ids_from_settings():
+            for aid in get_admin_ids():
                 try:
                     await bot.send_message(
                         int(aid),

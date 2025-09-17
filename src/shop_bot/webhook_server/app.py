@@ -27,7 +27,7 @@ from shop_bot.support_bot_controller import SupportBotController
 from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager import backup_manager
 from shop_bot.data_manager.database import (
-    update_setting, get_all_hosts, get_plans_for_host,
+    get_all_settings, update_setting, get_all_hosts, get_plans_for_host,
     create_host, delete_host, create_plan, delete_plan, update_plan, get_user_count,
     get_total_keys_count, get_total_spent_sum, get_daily_stats_for_charts,
     get_recent_transactions, get_paginated_transactions, get_all_users, get_user_keys,
@@ -36,7 +36,6 @@ from shop_bot.data_manager.database import (
     add_support_message, set_ticket_status, delete_ticket,
     get_closed_tickets_count, get_all_tickets_count, update_host_subscription_url,
     update_host_url, update_host_name, update_host_ssh_settings, get_latest_speedtest, get_speedtests,
-    update_host_panel_type, update_host_api_credentials,
     get_all_keys, get_keys_for_user, get_key_by_id, delete_key_by_id, update_key_comment, update_key_info,
     add_new_key, get_balance, adjust_user_balance, get_referrals_for_user,
     get_user, get_key_by_email
@@ -114,23 +113,9 @@ def create_webhook_app(bot_controller_instance):
             return f(*args, **kwargs)
         return decorated_function
 
-    def _get_all_settings_safe() -> dict:
-        # Локальная функция: собрать настройки через get_setting по известным ключам,
-        # чтобы не зависеть от наличия get_all_settings() в database.py
-        data = {}
-        try:
-            for k in ALL_SETTINGS_KEYS:
-                try:
-                    data[k] = get_setting(k)
-                except Exception:
-                    data[k] = None
-        except Exception:
-            pass
-        return data
-
     @flask_app.route('/login', methods=['GET', 'POST'])
     def login_page():
-        settings = _get_all_settings_safe()
+        settings = get_all_settings()
         if request.method == 'POST':
             if request.form.get('username') == settings.get("panel_login") and \
                request.form.get('password') == settings.get("panel_password"):
@@ -152,7 +137,7 @@ def create_webhook_app(bot_controller_instance):
     def get_common_template_data():
         bot_status = _bot_controller.get_status()
         support_bot_status = _support_bot_controller.get_status()
-        settings = _get_all_settings_safe()
+        settings = get_all_settings()
         required_for_start = ['telegram_bot_token', 'telegram_bot_username', 'admin_telegram_id']
         required_support_for_start = ['support_bot_token', 'support_bot_username', 'admin_telegram_id']
         all_settings_ok = all(settings.get(key) for key in required_for_start)
@@ -1409,38 +1394,7 @@ def create_webhook_app(bot_controller_instance):
             inbound=int(request.form['host_inbound_id']),
             subscription_url=(request.form.get('host_subscription_url') or '').strip() or None
         )
-        # Опционально обновим panel_type и API-поля, если были переданы
-        try:
-            host_name = (request.form.get('host_name') or '').strip()
-            panel_type = (request.form.get('panel_type') or '').strip()
-            api_key = (request.form.get('api_key') or '').strip() or None
-            project_id = (request.form.get('project_id') or '').strip() or None
-            if panel_type:
-                update_host_panel_type(host_name, panel_type)
-            if api_key or project_id:
-                update_host_api_credentials(host_name, api_key=api_key, project_id=project_id)
-        except Exception:
-            pass
         flash(f"Хост '{request.form['host_name']}' успешно добавлен.", 'success')
-        return redirect(url_for('settings_page', tab='hosts'))
-
-    @flask_app.route('/update-host-panel-type', methods=['POST'])
-    @login_required
-    def update_host_panel_type_route():
-        host_name = (request.form.get('host_name') or '').strip()
-        panel_type = (request.form.get('panel_type') or '').strip()
-        ok = update_host_panel_type(host_name, panel_type)
-        flash('Тип панели обновлён.' if ok else 'Не удалось обновить тип панели.', 'success' if ok else 'danger')
-        return redirect(url_for('settings_page', tab='hosts'))
-
-    @flask_app.route('/update-host-api', methods=['POST'])
-    @login_required
-    def update_host_api_route():
-        host_name = (request.form.get('host_name') or '').strip()
-        api_key = (request.form.get('api_key') or '').strip() or None
-        project_id = (request.form.get('project_id') or '').strip() or None
-        ok = update_host_api_credentials(host_name, api_key=api_key, project_id=project_id)
-        flash('API-данные хоста обновлены.' if ok else 'Не удалось обновить API-данные.', 'success' if ok else 'danger')
         return redirect(url_for('settings_page', tab='hosts'))
 
     @flask_app.route('/delete-host/<host_name>', methods=['POST'])
