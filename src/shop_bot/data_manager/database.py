@@ -923,8 +923,6 @@ def create_gift_key(user_id: int, host_name: str, key_email: str, months: int, x
             return cursor.lastrowid
     except sqlite3.IntegrityError as e:
         logging.error(f"Failed to create gift key for user {user_id}: duplicate email {key_email}: {e}")
-        return None
-    except sqlite3.Error as e:
         logging.error(f"Failed to create gift key for user {user_id}: {e}")
         return None
 
@@ -932,119 +930,27 @@ def get_setting(key: str) -> str | None:
     try:
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT value FROM bot_settings WHERE key = ?", (key,))
+            try:
+                cursor.execute("SELECT value FROM bot_settings WHERE key = ?", (key,))
+            except sqlite3.OperationalError as e:
+                if 'no such table' in str(e).lower():
+                    # Создадим таблицу и вернём None
+                    cursor.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS bot_settings (
+                            key TEXT PRIMARY KEY,
+                            value TEXT
+                        )
+                        """
+                    )
+                    return None
+                else:
+                    raise
             result = cursor.fetchone()
             return result[0] if result else None
     except sqlite3.Error as e:
         logging.error(f"Failed to get setting '{key}': {e}")
         return None
-
-def get_admin_ids() -> set[int]:
-    """Возвращает множество ID администраторов из настроек.
-    Поддерживает оба варианта: одиночный 'admin_telegram_id' и список 'admin_telegram_ids'
-    через запятую/пробелы или JSON-массив.
-    """
-    ids: set[int] = set()
-    try:
-        single = get_setting("admin_telegram_id")
-        if single:
-            try:
-                ids.add(int(single))
-            except Exception:
-                pass
-        multi_raw = get_setting("admin_telegram_ids")
-        if multi_raw:
-            s = (multi_raw or "").strip()
-            # Попробуем как JSON-массив
-            try:
-                arr = json.loads(s)
-                if isinstance(arr, list):
-                    for v in arr:
-                        try:
-                            ids.add(int(v))
-                        except Exception:
-                            pass
-                    return ids
-            except Exception:
-                pass
-            # Иначе как строка с разделителями (запятая/пробел)
-            parts = [p for p in re.split(r"[\s,]+", s) if p]
-            for p in parts:
-                try:
-                    ids.add(int(p))
-                except Exception:
-                    pass
-    except Exception as e:
-        logging.warning(f"get_admin_ids failed: {e}")
-    return ids
-
-def is_admin(user_id: int) -> bool:
-    """Проверка прав администратора по списку ID из настроек."""
-    try:
-        return int(user_id) in get_admin_ids()
-    except Exception:
-        return False
-        
-def get_referrals_for_user(user_id: int) -> list[dict]:
-    """Возвращает список пользователей, которых пригласил данный user_id.
-    Поля: telegram_id, username, registration_date, total_spent.
-    """
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT telegram_id, username, registration_date, total_spent
-                FROM users
-                WHERE referred_by = ?
-                ORDER BY registration_date DESC
-                """,
-                (user_id,)
-            )
-            rows = cursor.fetchall()
-            return [dict(r) for r in rows]
-    except sqlite3.Error as e:
-        logging.error(f"Failed to get referrals for user {user_id}: {e}")
-        return []
-        
-def get_all_settings() -> dict:
-    settings = {}
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("SELECT key, value FROM bot_settings")
-            rows = cursor.fetchall()
-            for row in rows:
-                settings[row['key']] = row['value']
-    except sqlite3.Error as e:
-        logging.error(f"Failed to get all settings: {e}")
-    return settings
-
-def update_setting(key: str, value: str):
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
-            conn.commit()
-            logging.info(f"Setting '{key}' updated.")
-    except sqlite3.Error as e:
-        logging.error(f"Failed to update setting '{key}': {e}")
-
-def create_plan(host_name: str, plan_name: str, months: int, price: float):
-    try:
-        host_name = normalize_host_name(host_name)
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO plans (host_name, plan_name, months, price) VALUES (?, ?, ?, ?)",
-                (host_name, plan_name, months, price)
-            )
-            conn.commit()
-            logging.info(f"Created new plan '{plan_name}' for host '{host_name}'.")
-    except sqlite3.Error as e:
-        logging.error(f"Failed to create plan for host '{host_name}': {e}")
 
 def get_plans_for_host(host_name: str) -> list[dict]:
     try:
