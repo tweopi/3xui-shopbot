@@ -4,8 +4,111 @@ import logging
 from pathlib import Path
 import json
 import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _attr_candidates(name: str) -> tuple[str, ...]:
+    parts = name.split("_")
+    camel = parts[0] + "".join(word.capitalize() for word in parts[1:]) if parts else name
+    pascal = camel.capitalize() if camel else camel
+    candidates = [name]
+    for alias in (camel, pascal):
+        if alias and alias not in candidates:
+            candidates.append(alias)
+    return tuple(candidates)
+
+
+def _get_client_attr(obj: Any, name: str, default: Any | None = None) -> Any | None:
+    for candidate in _attr_candidates(name):
+        try:
+            if hasattr(obj, candidate):
+                value = getattr(obj, candidate)
+                if value is not None:
+                    return value
+        except Exception:
+            continue
+        if isinstance(obj, dict) and candidate in obj:
+            value = obj[candidate]
+            if value is not None:
+                return value
+    return default
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            return int(raw)
+        try:
+            return int(float(raw))
+        except ValueError:
+            return None
+    return None
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            return None
+        if ts > 1e12:
+            ts /= 1000
+        return datetime.fromtimestamp(ts)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            return _as_datetime(int(raw))
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_client_expiry_ms(client: Any) -> int:
+    expiry_ms = 0
+    for field in ("expire_at", "expiry_time"):
+        raw = _get_client_attr(client, field)
+        if raw in (None, ""):
+            continue
+        dt = _as_datetime(raw)
+        if dt:
+            expiry_ms = int(dt.timestamp() * 1000)
+            break
+        raw_int = _coerce_int(raw)
+        if raw_int is None:
+            continue
+        expiry_ms = raw_int if raw_int > 1e12 else (raw_int * 1000 if raw_int > 1e9 else raw_int)
+        break
+
+    reset_val = _coerce_int(_get_client_attr(client, "reset")) or 0
+    if reset_val:
+        if reset_val > 1e12:
+            expiry_ms = max(expiry_ms, reset_val)
+        else:
+            expiry_ms += int(reset_val) * 24 * 3600 * 1000
+
+    return int(expiry_ms)
 
 PROJECT_ROOT = Path("/app/project")
 DB_FILE = PROJECT_ROOT / "users.db"
@@ -1520,8 +1623,13 @@ def update_key_status_from_server(key_email: str, xui_client_data):
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             if xui_client_data:
-                expiry_date = datetime.fromtimestamp(xui_client_data.expiry_time / 1000)
-                cursor.execute("UPDATE vpn_keys SET xui_client_uuid = ?, expiry_date = ? WHERE key_email = ?", (xui_client_data.id, expiry_date, key_email))
+                expiry_ms = _parse_client_expiry_ms(xui_client_data)
+                expiry_dt = datetime.fromtimestamp(expiry_ms / 1000) if expiry_ms else datetime.fromtimestamp(0)
+                client_uuid = _get_client_attr(xui_client_data, "short_uuid") or _get_client_attr(xui_client_data, "id") or key_email
+                cursor.execute(
+                    "UPDATE vpn_keys SET xui_client_uuid = ?, expiry_date = ? WHERE key_email = ?",
+                    (str(client_uuid), expiry_dt, key_email),
+                )
             else:
                 cursor.execute("DELETE FROM vpn_keys WHERE key_email = ?", (key_email,))
             conn.commit()

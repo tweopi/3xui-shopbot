@@ -2,13 +2,175 @@ import uuid
 from datetime import datetime, timedelta
 import logging
 from urllib.parse import urlparse
-from typing import List, Dict
+from typing import List, Dict, Any
 
 from py3xui import Api, Client, Inbound
 
 from shop_bot.data_manager.database import get_host, get_key_by_email, get_setting
 
 logger = logging.getLogger(__name__)
+
+
+def _attribute_candidates(name: str) -> tuple[str, ...]:
+    """Return snake_case, camelCase and PascalCase variants for attribute lookup."""
+
+    parts = name.split("_")
+    camel = parts[0] + "".join(word.capitalize() for word in parts[1:]) if parts else name
+    pascal = camel.capitalize() if camel else camel
+    candidates = [name]
+    for alias in (camel, pascal):
+        if alias and alias not in candidates:
+            candidates.append(alias)
+    return tuple(candidates)
+
+
+def _get_attr_value(obj: Any, name: str, default: Any | None = None) -> Any | None:
+    """Safely obtain attribute or dict value trying snake/camel variants."""
+
+    for candidate in _attribute_candidates(name):
+        try:
+            if hasattr(obj, candidate):
+                value = getattr(obj, candidate)
+                if value is not None:
+                    return value
+        except Exception:
+            continue
+        if isinstance(obj, dict) and candidate in obj:
+            value = obj[candidate]
+            if value is not None:
+                return value
+    return default
+
+
+def _set_attr_value(obj: Any, name: str, value: Any) -> bool:
+    """Set attribute or dict key trying snake/camel variants."""
+
+    assigned = False
+    for candidate in _attribute_candidates(name):
+        try:
+            if isinstance(obj, dict):
+                obj[candidate] = value
+                assigned = True
+                break
+            if hasattr(obj, candidate):
+                setattr(obj, candidate, value)
+                assigned = True
+                break
+        except Exception:
+            continue
+    if not assigned:
+        try:
+            setattr(obj, name, value)
+            assigned = True
+        except Exception:
+            if isinstance(obj, dict):
+                try:
+                    obj[name] = value
+                    assigned = True
+                except Exception:
+                    pass
+    return assigned
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    """Convert different representations of time to datetime."""
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            return None
+        if ts > 1e12:
+            ts /= 1000
+        return datetime.fromtimestamp(ts)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            return _as_datetime(int(raw))
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _compute_target_expiry(existing_client: Any | None, days_to_add: int | None, target_expiry_ms: int | None) -> int:
+    """Determine new expiry in milliseconds based on panel client data."""
+
+    if target_expiry_ms is not None:
+        return int(target_expiry_ms)
+    if days_to_add is None:
+        raise ValueError("Either days_to_add or target_expiry_ms must be provided")
+
+    now = datetime.now()
+    if existing_client is not None:
+        expiry_candidate = _get_attr_value(existing_client, "expire_at")
+        if expiry_candidate is None:
+            expiry_candidate = _get_attr_value(existing_client, "expiry_time")
+        current_expiry = _as_datetime(expiry_candidate)
+        if current_expiry and current_expiry > now:
+            return int((current_expiry + timedelta(days=days_to_add)).timestamp() * 1000)
+
+    return int((now + timedelta(days=days_to_add)).timestamp() * 1000)
+
+
+def _extract_subscription_token(client: Any) -> str | None:
+    for field in ("subscription_token", "subscription_id", "subscription", "sub_token", "sub_id"):
+        token = _get_attr_value(client, field)
+        if token:
+            return str(token)
+    return None
+
+
+def _set_expiry_fields(client: Any, expiry_ms: int):
+    _set_attr_value(client, "expiry_time", int(expiry_ms))
+    expiry_dt = datetime.fromtimestamp(int(expiry_ms) / 1000)
+    if not _set_attr_value(client, "expire_at", expiry_dt):
+        _set_attr_value(client, "expire_at", int(expiry_ms))
+
+
+def _build_subscription_link(
+    host_data: dict,
+    user_uuid: str,
+    *,
+    sub_token: str | None = None,
+    info: Any | None = None,
+) -> str:
+    """Build subscription link using panel info, host settings and fallback values."""
+
+    host_url = (host_data.get("host_url") or "").strip()
+
+    info_base = ""
+    if info is not None:
+        info_base = str(_get_attr_value(info, "subscription_url") or "").strip()
+        sub_token = sub_token or _extract_subscription_token(info)
+
+    host_base = str(host_data.get("subscription_url") or "").strip()
+    base = info_base or host_base
+
+    if sub_token:
+        if base:
+            return base.replace("{token}", sub_token) if "{token}" in base else f"{base.rstrip('/')}/{sub_token}"
+        domain = (get_setting("domain") or "").strip()
+        parsed = urlparse(host_url)
+        hostname = domain if domain else (parsed.hostname or "")
+        scheme = parsed.scheme if parsed.scheme in ("http", "https") else "https"
+        return f"{scheme}://{hostname}/sub/{sub_token}"
+
+    if base:
+        return base
+
+    domain = (get_setting("domain") or "").strip()
+    parsed = urlparse(host_url)
+    hostname = domain if domain else (parsed.hostname or "")
+    scheme = parsed.scheme if parsed.scheme in ("http", "https") else "https"
+    return f"{scheme}://{hostname}/sub/{user_uuid}?format=v2ray"
 
 def login_to_host(host_url: str, username: str, password: str, inbound_id: int) -> tuple[Api | None, Inbound | None]:
     try:
@@ -48,42 +210,35 @@ def get_connection_string(inbound: Inbound, user_uuid: str, host_url: str, remar
     )
     return connection_string
 
-def get_subscription_link(user_uuid: str, host_url: str, host_name: str | None = None, sub_token: str | None = None) -> str:
-    """Build subscription URL with the following priority:
-    1) Host-specific subscription_url (xui_hosts.subscription_url)
-    2) Fallback: domain/host_url + default path
-    Supports optional token replacement if base contains "{token}".
-    """
-    host_base = None
-    try:
-        if host_name:
+def get_subscription_link(
+    user_uuid: str,
+    host_url: str,
+    host_name: str | None = None,
+    sub_token: str | None = None,
+    *,
+    info: Any | None = None,
+) -> str:
+    """Public helper kept for backward compatibility. Delegates to _build_subscription_link."""
+
+    host_data: dict[str, Any] = {"host_url": host_url}
+    if host_name:
+        try:
             host = get_host(host_name)
             if host:
-                host_base = (host.get("subscription_url") or "").strip()
-    except Exception:
-        host_base = None
+                host_data.update(host)
+            else:
+                host_data["host_name"] = host_name
+        except Exception:
+            host_data["host_name"] = host_name
+    return _build_subscription_link(host_data, user_uuid, sub_token=sub_token, info=info)
 
-    base = (host_base or "").strip()
-
-    if sub_token:
-        if base:
-            return base.replace("{token}", sub_token) if "{token}" in base else f"{base.rstrip('/')}/{sub_token}"
-        domain = (get_setting("domain") or "").strip()
-        parsed = urlparse(host_url)
-        hostname = domain if domain else (parsed.hostname or "")
-        scheme = parsed.scheme if parsed.scheme in ("http", "https") else "https"
-        return f"{scheme}://{hostname}/sub/{sub_token}"
-
-    if base:
-        return base
-
-    domain = (get_setting("domain") or "").strip()
-    parsed = urlparse(host_url)
-    hostname = domain if domain else (parsed.hostname or "")
-    scheme = parsed.scheme if parsed.scheme in ("http", "https") else "https"
-    return f"{scheme}://{hostname}/sub/{user_uuid}?format=v2ray"
-
-def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days_to_add: int | None = None, target_expiry_ms: int | None = None) -> tuple[str | None, int | None, str | None]:
+def update_or_create_client_on_panel(
+    api: Api,
+    inbound_id: int,
+    email: str,
+    days_to_add: int | None = None,
+    target_expiry_ms: int | None = None,
+) -> tuple[Any | None, int | None, str | None]:
     try:
         inbound_to_modify = api.inbound.get_by_id(inbound_id)
         if not inbound_to_modify:
@@ -98,53 +253,28 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
                 client_index = i
                 break
         
-        # Determine new expiry time
-        if target_expiry_ms is not None:
-            new_expiry_ms = int(target_expiry_ms)
-        else:
-            if days_to_add is None:
-                raise ValueError("Either days_to_add or target_expiry_ms must be provided")
-            if client_index != -1:
-                existing_client = inbound_to_modify.settings.clients[client_index]
-                if existing_client.expiry_time > int(datetime.now().timestamp() * 1000):
-                    current_expiry_dt = datetime.fromtimestamp(existing_client.expiry_time / 1000)
-                    new_expiry_dt = current_expiry_dt + timedelta(days=days_to_add)
-                else:
-                    new_expiry_dt = datetime.now() + timedelta(days=days_to_add)
-            else:
-                new_expiry_dt = datetime.now() + timedelta(days=days_to_add)
+        existing_client = None
+        if client_index != -1:
+            existing_client = inbound_to_modify.settings.clients[client_index]
 
-            new_expiry_ms = int(new_expiry_dt.timestamp() * 1000)
+        new_expiry_ms = _compute_target_expiry(existing_client, days_to_add, target_expiry_ms)
 
         client_sub_token: str | None = None
 
-        if client_index != -1:
-            # Disable auto-reset/auto-renew on extension
-            try:
-                inbound_to_modify.settings.clients[client_index].reset = 0
-            except Exception:
-                pass
-            inbound_to_modify.settings.clients[client_index].enable = True
-            inbound_to_modify.settings.clients[client_index].expiry_time = new_expiry_ms
+        if existing_client is not None:
+            _set_attr_value(existing_client, "reset", 0)
+            _set_attr_value(existing_client, "enable", True)
+            _set_expiry_fields(existing_client, new_expiry_ms)
 
-            existing_client = inbound_to_modify.settings.clients[client_index]
-            client_uuid = existing_client.id
-            try:
-                sub_token_existing = None
-                for attr in ("subId", "subscription", "sub_id"):
-                    if hasattr(existing_client, attr):
-                        sub_token_existing = getattr(existing_client, attr)
-                        break
-                if not sub_token_existing:
-                    import secrets
-                    client_sub_token = secrets.token_hex(12)
-                    for attr in ("subId", "subscription", "sub_id"):
-                        try:
-                            setattr(existing_client, attr, client_sub_token)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+            client_sub_token = _extract_subscription_token(existing_client)
+            if not client_sub_token:
+                import secrets
+
+                client_sub_token = secrets.token_hex(12)
+                for attr in ("subscription_token", "subscription_id", "subscription", "sub_token", "sub_id"):
+                    _set_attr_value(existing_client, attr, client_sub_token)
+
+            client_obj: Any = existing_client
         else:
             client_uuid = str(uuid.uuid4())
             new_client = Client(
@@ -152,29 +282,27 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
                 email=email,
                 enable=True,
                 flow="xtls-rprx-vision",
-                expiry_time=new_expiry_ms
+                expiry_time=new_expiry_ms,
             )
-            # Ensure no auto-reset/auto-renew for new clients
-            try:
-                setattr(new_client, "reset", 0)
-            except Exception:
-                pass
 
-            try:
+            _set_attr_value(new_client, "reset", 0)
+            _set_attr_value(new_client, "short_uuid", client_uuid)
+            _set_expiry_fields(new_client, new_expiry_ms)
+
+            client_sub_token = _extract_subscription_token(new_client)
+            if not client_sub_token:
                 import secrets
+
                 client_sub_token = secrets.token_hex(12)
-                for attr in ("subId", "subscription", "sub_id"):
-                    try:
-                        setattr(new_client, attr, client_sub_token)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            for attr in ("subscription_token", "subscription_id", "subscription", "sub_token", "sub_id"):
+                _set_attr_value(new_client, attr, client_sub_token)
+
             inbound_to_modify.settings.clients.append(new_client)
+            client_obj = new_client
 
         api.inbound.update(inbound_id, inbound_to_modify)
 
-        return client_uuid, new_expiry_ms, client_sub_token
+        return client_obj, new_expiry_ms, client_sub_token
 
     except Exception as e:
         logger.error(f"Ошибка в update_or_create_client_on_panel: {e}", exc_info=True)
@@ -197,19 +325,27 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
         return None
         
     # Prefer exact expiry when provided (e.g., switching hosts), otherwise add days (purchase/extend/trial)
-    client_uuid, new_expiry_ms, client_sub_token = update_or_create_client_on_panel(
+    client_obj, new_expiry_ms, client_sub_token = update_or_create_client_on_panel(
         api, inbound.id, email, days_to_add=days_to_add, target_expiry_ms=expiry_timestamp_ms
     )
 
-    if not client_uuid:
+    if not client_obj:
         logger.error(f"Сбой рабочего процесса: Не удалось создать/обновить клиента '{email}' на хосте '{host_name}'.")
         return None
-    
-    connection_string = get_subscription_link(client_uuid, host_data['host_url'], host_name, sub_token=client_sub_token)
-    
+
+    client_uuid = _get_attr_value(client_obj, "short_uuid") or _get_attr_value(client_obj, "id") or _get_attr_value(client_obj, "email")
+    if client_uuid is None:
+        client_uuid = str(uuid.uuid4())
+    client_uuid = str(client_uuid)
+
+    if not client_sub_token:
+        client_sub_token = _extract_subscription_token(client_obj)
+
+    connection_string = _build_subscription_link(host_data, client_uuid, sub_token=client_sub_token, info=client_obj)
+
     logger.info(f"Успешно обработан ключ для '{email}' на хосте '{host_name}'.")
-    
-    
+
+
     return {
         "client_uuid": client_uuid,
         "email": email,
@@ -238,27 +374,31 @@ async def get_key_details_from_host(key_data: dict) -> dict | None:
     if not api or not inbound: return None
 
     client_sub_token = None
+    matched_client: Any | None = None
+    resolved_uuid_value = key_data.get('xui_client_uuid')
+    resolved_uuid = str(resolved_uuid_value) if resolved_uuid_value else None
+
     try:
         if inbound.settings and inbound.settings.clients:
             for client in inbound.settings.clients:
-                if getattr(client, "id", None) == key_data['xui_client_uuid'] or getattr(client, "email", None) == key_data.get('email'):
-                    candidate_fields = ("subId", "subscription", "sub_id", "subscriptionId", "subscription_token")
-                    for attr in candidate_fields:
-                        val = None
-                        if hasattr(client, attr):
-                            val = getattr(client, attr)
-                        else:
-                            try:
-                                val = client.get(attr)
-                            except Exception:
-                                pass
-                        if val:
-                            client_sub_token = val
-                            break
+                client_uuid = _get_attr_value(client, "short_uuid") or _get_attr_value(client, "id")
+                client_email = _get_attr_value(client, "email")
+
+                uuid_matches = resolved_uuid and client_uuid and str(client_uuid) == str(resolved_uuid)
+                email_matches = client_email and client_email == key_data.get('email')
+
+                if uuid_matches or email_matches:
+                    client_sub_token = _extract_subscription_token(client)
+                    matched_client = client
+                    if not resolved_uuid and client_uuid:
+                        resolved_uuid = str(client_uuid)
                     break
     except Exception:
         pass
-    connection_string = get_subscription_link(key_data['xui_client_uuid'], host_db_data['host_url'], host_name, sub_token=client_sub_token)
+
+    final_uuid = resolved_uuid or key_data.get('xui_client_uuid') or key_data.get('email') or ""
+    final_uuid = str(final_uuid)
+    connection_string = _build_subscription_link(host_db_data, final_uuid, sub_token=client_sub_token, info=matched_client)
     return {"connection_string": connection_string}
 
 async def delete_client_on_host(host_name: str, client_email: str) -> bool:

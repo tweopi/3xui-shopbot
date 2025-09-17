@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram import Bot
@@ -19,6 +20,108 @@ NOTIFY_BEFORE_HOURS = {72, 48, 24, 1}
 notified_users = {}
 
 logger = logging.getLogger(__name__)
+
+
+def _attr_candidates(name: str) -> tuple[str, ...]:
+    parts = name.split("_")
+    camel = parts[0] + "".join(word.capitalize() for word in parts[1:]) if parts else name
+    pascal = camel.capitalize() if camel else camel
+    candidates = [name]
+    for alias in (camel, pascal):
+        if alias and alias not in candidates:
+            candidates.append(alias)
+    return tuple(candidates)
+
+
+def _get_client_value(client: Any, name: str, default: Any | None = None) -> Any | None:
+    for candidate in _attr_candidates(name):
+        try:
+            if hasattr(client, candidate):
+                value = getattr(client, candidate)
+                if value is not None:
+                    return value
+        except Exception:
+            continue
+        if isinstance(client, dict) and candidate in client:
+            value = client[candidate]
+            if value is not None:
+                return value
+    return default
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            return int(raw)
+        try:
+            return int(float(raw))
+        except ValueError:
+            return None
+    return None
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            ts = float(value)
+        except (TypeError, ValueError):
+            return None
+        if ts > 1e12:
+            ts /= 1000
+        return datetime.fromtimestamp(ts)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            return _as_datetime(int(raw))
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_remote_expiry(client: Any) -> int:
+    expiry_ms = 0
+    for field in ("expire_at", "expiry_time"):
+        raw = _get_client_value(client, field)
+        if raw in (None, ""):
+            continue
+        dt = _as_datetime(raw)
+        if dt:
+            expiry_ms = int(dt.timestamp() * 1000)
+            break
+        raw_int = _coerce_int(raw)
+        if raw_int is None:
+            continue
+        expiry_ms = raw_int if raw_int > 1e12 else (raw_int * 1000 if raw_int > 1e9 else raw_int)
+        break
+
+    reset_val = _coerce_int(_get_client_value(client, "reset")) or 0
+    if reset_val:
+        if reset_val > 1e12:
+            expiry_ms = max(expiry_ms, reset_val)
+        else:
+            expiry_ms += int(reset_val) * 24 * 3600 * 1000
+
+    return int(expiry_ms)
 
 # Запуск обоих видов измерений 3 раза в сутки (каждые 8 часов)
 SPEEDTEST_INTERVAL_SECONDS = 8 * 3600
@@ -174,18 +277,38 @@ async def sync_keys_with_panels():
 
                 server_client = clients_on_server.pop(key_email, None)
 
-                if server_client:
-                    reset_days = server_client.reset if server_client.reset is not None else 0
-                    server_expiry_ms = server_client.expiry_time + reset_days * 24 * 3600 * 1000
-                    local_expiry_dt = expiry_date
-                    local_expiry_ms = int(local_expiry_dt.timestamp() * 1000)
+                if not server_client:
+                    local_uuid = str(db_key.get('xui_client_uuid') or "")
+                    if local_uuid:
+                        for orphan_email, candidate in list(clients_on_server.items()):
+                            candidate_uuid = _get_client_value(candidate, "short_uuid") or _get_client_value(candidate, "id")
+                            if candidate_uuid and str(candidate_uuid) == local_uuid:
+                                server_client = candidate
+                                clients_on_server.pop(orphan_email, None)
+                                break
 
+                if server_client:
+                    server_uuid = _get_client_value(server_client, "short_uuid") or _get_client_value(server_client, "id")
+                    local_uuid_val = db_key.get('xui_client_uuid')
+                    server_expiry_ms = _parse_remote_expiry(server_client)
+                    local_expiry_ms = int(expiry_date.timestamp() * 1000)
+
+                    needs_update = False
+                    if server_uuid and local_uuid_val and str(server_uuid) != str(local_uuid_val):
+                        needs_update = True
                     if abs(server_expiry_ms - local_expiry_ms) > 1000:
+                        needs_update = True
+
+                    if needs_update:
                         database.update_key_status_from_server(key_email, server_client)
                         total_affected_records += 1
-                        logger.debug(f"Scheduler: Синхронизирован ключ '{key_email}' для хоста '{host_name}' (обновлён).")
+                        logger.debug(
+                            f"Scheduler: Синхронизирован ключ '{key_email}' для хоста '{host_name}' (uuid/expiry обновлены)."
+                        )
                 else:
-                    logger.warning(f"Scheduler: Ключ '{key_email}' для хоста '{host_name}' не найден на сервере. Помечаю к удалению в локальной БД.")
+                    logger.warning(
+                        f"Scheduler: Ключ '{key_email}' для хоста '{host_name}' не найден на сервере. Помечаю к удалению в локальной БД."
+                    )
                     database.update_key_status_from_server(key_email, None)
                     total_affected_records += 1
 
@@ -216,9 +339,13 @@ async def sync_keys_with_panels():
                         if existing:
                             continue
 
-                        reset_days = getattr(orphan_client, 'reset', 0) or 0
-                        expiry_ms = int(getattr(orphan_client, 'expiry_time', 0)) + int(reset_days) * 24 * 3600 * 1000
-                        client_uuid = getattr(orphan_client, 'id', None) or getattr(orphan_client, 'email', None) or ''
+                        expiry_ms = _parse_remote_expiry(orphan_client)
+                        client_uuid = (
+                            _get_client_value(orphan_client, 'short_uuid')
+                            or _get_client_value(orphan_client, 'id')
+                            or _get_client_value(orphan_client, 'email')
+                            or ''
+                        )
 
                         if not client_uuid:
                             logger.warning(
