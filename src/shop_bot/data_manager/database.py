@@ -295,6 +295,31 @@ def run_migration():
         if table_exists:
             cursor.execute("PRAGMA table_info(xui_hosts)")
             xh_columns = [row[1] for row in cursor.fetchall()]
+            # New columns for multi-panel support (xui/remnawave) and API-based auth
+            if 'panel_type' not in xh_columns:
+                try:
+                    cursor.execute("ALTER TABLE xui_hosts ADD COLUMN panel_type TEXT DEFAULT 'xui'")
+                    logging.info(" -> Столбец 'panel_type' успешно добавлен в 'xui_hosts' (default 'xui').")
+                except sqlite3.Error as e:
+                    logging.warning(f" -> Не удалось добавить 'panel_type' в 'xui_hosts': {e}")
+            else:
+                logging.info(" -> Столбец 'panel_type' уже существует в 'xui_hosts'.")
+            if 'api_key' not in xh_columns:
+                try:
+                    cursor.execute("ALTER TABLE xui_hosts ADD COLUMN api_key TEXT")
+                    logging.info(" -> Столбец 'api_key' успешно добавлен в 'xui_hosts'.")
+                except sqlite3.Error as e:
+                    logging.warning(f" -> Не удалось добавить 'api_key' в 'xui_hosts': {e}")
+            else:
+                logging.info(" -> Столбец 'api_key' уже существует в 'xui_hosts'.")
+            if 'project_id' not in xh_columns:
+                try:
+                    cursor.execute("ALTER TABLE xui_hosts ADD COLUMN project_id TEXT")
+                    logging.info(" -> Столбец 'project_id' успешно добавлен в 'xui_hosts'.")
+                except sqlite3.Error as e:
+                    logging.warning(f" -> Не удалось добавить 'project_id' в 'xui_hosts': {e}")
+            else:
+                logging.info(" -> Столбец 'project_id' уже существует в 'xui_hosts'.")
             if 'subscription_url' not in xh_columns:
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN subscription_url TEXT")
                 logging.info(" -> Столбец 'subscription_url' успешно добавлен в 'xui_hosts'.")
@@ -514,17 +539,48 @@ def update_host_name(old_name: str, new_name: str) -> bool:
         logging.error(f"Не удалось переименовать хост с '{old_name}' на '{new_name}': {e}")
         return False
 
-def delete_host(host_name: str):
+def update_host_panel_type(host_name: str, panel_type: str) -> bool:
+    """Обновить тип панели для хоста (xui | remnawave)."""
     try:
-        host_name = normalize_host_name(host_name)
+        host_name_n = normalize_host_name(host_name)
+        pt = (panel_type or 'xui').strip().lower()
+        if pt not in ('xui', 'remnawave'):
+            pt = 'xui'
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM plans WHERE TRIM(host_name) = TRIM(?)", (host_name,))
-            cursor.execute("DELETE FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name_n,))
+            if cursor.fetchone() is None:
+                logging.warning(f"update_host_panel_type: хост не найден '{host_name_n}'")
+                return False
+            cursor.execute(
+                "UPDATE xui_hosts SET panel_type = ? WHERE TRIM(host_name) = TRIM(?)",
+                (pt, host_name_n)
+            )
             conn.commit()
-            logging.info(f"Хост '{host_name}' и его тарифы успешно удалены.")
+            return True
     except sqlite3.Error as e:
-        logging.error(f"Ошибка удаления хоста '{host_name}': {e}")
+        logging.error(f"Не удалось обновить panel_type для хоста '{host_name}': {e}")
+        return False
+
+def update_host_api_credentials(host_name: str, api_key: str | None = None, project_id: str | None = None) -> bool:
+    """Обновить API-поля (api_key, project_id) для хоста (используется Remnawave)."""
+    try:
+        host_name_n = normalize_host_name(host_name)
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name_n,))
+            if cursor.fetchone() is None:
+                logging.warning(f"update_host_api_credentials: хост не найден '{host_name_n}'")
+                return False
+            cursor.execute(
+                "UPDATE xui_hosts SET api_key = ?, project_id = ? WHERE TRIM(host_name) = TRIM(?)",
+                ((api_key or None), (project_id or None), host_name_n)
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось обновить API-данные для хоста '{host_name}': {e}")
+        return False
 
 def get_host(host_name: str) -> dict | None:
     try:

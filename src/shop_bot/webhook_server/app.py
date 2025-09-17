@@ -36,6 +36,7 @@ from shop_bot.data_manager.database import (
     add_support_message, set_ticket_status, delete_ticket,
     get_closed_tickets_count, get_all_tickets_count, update_host_subscription_url,
     update_host_url, update_host_name, update_host_ssh_settings, get_latest_speedtest, get_speedtests,
+    update_host_panel_type, update_host_api_credentials,
     get_all_keys, get_keys_for_user, get_key_by_id, delete_key_by_id, update_key_comment, update_key_info,
     add_new_key, get_balance, adjust_user_balance, get_referrals_for_user,
     get_user, get_key_by_email
@@ -1394,7 +1395,38 @@ def create_webhook_app(bot_controller_instance):
             inbound=int(request.form['host_inbound_id']),
             subscription_url=(request.form.get('host_subscription_url') or '').strip() or None
         )
+        # Опционально обновим panel_type и API-поля, если были переданы
+        try:
+            host_name = (request.form.get('host_name') or '').strip()
+            panel_type = (request.form.get('panel_type') or '').strip()
+            api_key = (request.form.get('api_key') or '').strip() or None
+            project_id = (request.form.get('project_id') or '').strip() or None
+            if panel_type:
+                update_host_panel_type(host_name, panel_type)
+            if api_key or project_id:
+                update_host_api_credentials(host_name, api_key=api_key, project_id=project_id)
+        except Exception:
+            pass
         flash(f"Хост '{request.form['host_name']}' успешно добавлен.", 'success')
+        return redirect(url_for('settings_page', tab='hosts'))
+
+    @flask_app.route('/update-host-panel-type', methods=['POST'])
+    @login_required
+    def update_host_panel_type_route():
+        host_name = (request.form.get('host_name') or '').strip()
+        panel_type = (request.form.get('panel_type') or '').strip()
+        ok = update_host_panel_type(host_name, panel_type)
+        flash('Тип панели обновлён.' if ok else 'Не удалось обновить тип панели.', 'success' if ok else 'danger')
+        return redirect(url_for('settings_page', tab='hosts'))
+
+    @flask_app.route('/update-host-api', methods=['POST'])
+    @login_required
+    def update_host_api_route():
+        host_name = (request.form.get('host_name') or '').strip()
+        api_key = (request.form.get('api_key') or '').strip() or None
+        project_id = (request.form.get('project_id') or '').strip() or None
+        ok = update_host_api_credentials(host_name, api_key=api_key, project_id=project_id)
+        flash('API-данные хоста обновлены.' if ok else 'Не удалось обновить API-данные.', 'success' if ok else 'danger')
         return redirect(url_for('settings_page', tab='hosts'))
 
     @flask_app.route('/delete-host/<host_name>', methods=['POST'])

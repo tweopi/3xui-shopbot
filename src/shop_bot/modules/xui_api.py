@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from typing import List, Dict
 
 from py3xui import Api, Client, Inbound
+from . import remnawave_api
 
 from shop_bot.data_manager.database import get_host, get_key_by_email, get_setting
 
@@ -185,6 +186,19 @@ async def create_or_update_key_on_host(host_name: str, email: str, days_to_add: 
     if not host_data:
         logger.error(f"Сбой рабочего процесса: Хост '{host_name}' не найден в базе данных.")
         return None
+    try:
+        panel_type = (host_data.get('panel_type') or 'xui').strip().lower()
+    except Exception:
+        panel_type = 'xui'
+
+    if panel_type == 'remnawave':
+        # Делегируем в адаптер Remnawave (через host_data)
+        result = await remnawave_api.create_or_update_key_on_host(host_data, email, days_to_add=days_to_add, expiry_timestamp_ms=expiry_timestamp_ms)
+        if not result:
+            logger.error(f"Remnawave: Не удалось создать/обновить клиента '{email}' на хосте '{host_name}'.")
+            return None
+        logger.info(f"Remnawave: успешно обработан ключ для '{email}' на хосте '{host_name}'.")
+        return result
 
     api, inbound = login_to_host(
         host_url=host_data['host_url'],
@@ -228,6 +242,13 @@ async def get_key_details_from_host(key_data: dict) -> dict | None:
     if not host_db_data:
         logger.error(f"Не удалось получить данные ключа: хост '{host_name}' не найден в базе данных.")
         return None
+    try:
+        panel_type = (host_db_data.get('panel_type') or 'xui').strip().lower()
+    except Exception:
+        panel_type = 'xui'
+
+    if panel_type == 'remnawave':
+        return await remnawave_api.get_key_details_from_host(key_data, host_db_data)
 
     api, inbound = login_to_host(
         host_url=host_db_data['host_url'],
@@ -266,6 +287,13 @@ async def delete_client_on_host(host_name: str, client_email: str) -> bool:
     if not host_data:
         logger.error(f"Не удалось удалить клиента: хост '{host_name}' не найден.")
         return False
+    try:
+        panel_type = (host_data.get('panel_type') or 'xui').strip().lower()
+    except Exception:
+        panel_type = 'xui'
+
+    if panel_type == 'remnawave':
+        return await remnawave_api.delete_client_on_host(host_data, client_email)
 
     api, inbound = login_to_host(
         host_url=host_data['host_url'],

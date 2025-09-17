@@ -123,6 +123,23 @@
 								<input type="text" id="host_subscription_url" name="host_subscription_url" placeholder="например, https://sub.example.com/{token}" />
 								<small>Укажите ссылку на подписку для этого хоста.</small>
 							</div>
+							<hr />
+							<div class="form-group">
+								<label for="panel_type">Тип панели:</label>
+								<select id="panel_type" name="panel_type">
+									<option value="xui" selected>XUI / 3xui</option>
+									<option value="remnawave">Remnawave</option>
+								</select>
+								<small class="text-secondary">Можно изменить позже в карточке хоста.</small>
+							</div>
+							<div class="form-group">
+								<label for="api_key">API Token (Remnawave):</label>
+								<input type="text" id="api_key" name="api_key" placeholder="Опционально при создании" />
+							</div>
+							<div class="form-group">
+								<label for="project_id">Project ID (Remnawave):</label>
+								<input type="text" id="project_id" name="project_id" placeholder="Опционально" />
+							</div>
 							<button type="submit" class="btn btn-primary">Добавить</button>
 						</form>
 					</div>
@@ -175,6 +192,24 @@
 					<input class="form-control pill" type="text" name="host_subscription_url" placeholder="Ссылка подписки для этого хоста" value="{{ host.subscription_url or '' }}" />
 					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить ссылку</button>
 				</form>
+                <!-- Тип панели и API-данные -->
+                <form action="{{ url_for('update_host_panel_type_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="host_name" value="{{ host.host_name }}" />
+                    <label class="form-label" for="panel_type_{{ loop.index }}">Тип панели:</label>
+                    <select id="panel_type_{{ loop.index }}" class="form-select pill" name="panel_type" style="max-width:220px;">
+                        <option value="xui" {% if (host.panel_type or 'xui') == 'xui' %}selected{% endif %}>XUI / 3xui</option>
+                        <option value="remnawave" {% if host.panel_type == 'remnawave' %}selected{% endif %}>Remnawave</option>
+                    </select>
+                    <button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить</button>
+                </form>
+                <form action="{{ url_for('update_host_api_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <input type="hidden" name="host_name" value="{{ host.host_name }}" />
+                    <input class="form-control pill" type="text" name="api_key" placeholder="API Token (Remnawave)" value="{{ host.api_key or '' }}" style="min-width: 260px;" />
+                    <input class="form-control pill" type="text" name="project_id" placeholder="Project ID (Remnawave)" value="{{ host.project_id or '' }}" style="min-width: 200px; margin-left:6px;" />
+                    <button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить API</button>
+                </form>
                 <!-- SSH настройки для speedtest на удалённом хосте -->
                 <div class="card glass" style="margin: 8px 0;">
                   <div class="card-body">
