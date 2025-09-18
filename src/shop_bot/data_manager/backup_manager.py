@@ -8,7 +8,7 @@ from pathlib import Path
 from aiogram import Bot
 from aiogram.types import FSInputFile
 
-from . import database
+from . import remnawave_repository as rw_repo
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 BACKUPS_DIR = Path("/app/project/backups")
 BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Имя файла БД см. в database.DB_FILE
-DB_FILE: Path = database.DB_FILE
+# Имя файла БД см. в rw_repo.DB_FILE
+DB_FILE: Path = rw_repo.DB_FILE
 
 
 def _timestamp() -> str:
@@ -79,8 +79,7 @@ async def send_backup_to_admins(bot: Bot, zip_path: Path) -> int:
     cnt = 0
     try:
         try:
-            from .database import get_admin_ids
-            admin_ids = list(get_admin_ids() or [])
+            admin_ids = list(rw_repo.get_admin_ids() or [])
         except Exception:
             admin_ids = []
         if not admin_ids:
@@ -178,7 +177,7 @@ def restore_from_file(uploaded_path: Path) -> bool:
         
         # Миграции на всякий случай
         try:
-            database.run_migration()
+            rw_repo.run_migration()
         except Exception:
             pass
 

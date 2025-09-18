@@ -6,7 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest
 
-from shop_bot.data_manager.database import (
+from shop_bot.data_manager.remnawave_repository import (
     get_setting,
     create_support_ticket,
     add_support_message,

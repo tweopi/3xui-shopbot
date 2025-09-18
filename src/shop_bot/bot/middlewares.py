@@ -2,7 +2,7 @@ from typing import Callable, Dict, Any, Awaitable
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery, Chat
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from shop_bot.data_manager.database import get_user, get_setting
+from shop_bot.data_manager.remnawave_repository import get_user, get_setting
 
 class BanMiddleware(BaseMiddleware):
     async def __call__(

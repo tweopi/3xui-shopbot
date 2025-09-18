@@ -102,15 +102,15 @@
 								<input type="text" id="host_name" name="host_name" required />
 							</div>
 							<div class="form-group">
-								<label for="host_url">URL панели XUI:</label>
+								<label for="host_url">URL панели Remnawave:</label>
 								<input type="url" id="host_url" name="host_url" placeholder="http://123.45.67.89:54321" required />
 							</div>
 							<div class="form-group">
-								<label for="host_username">Логин XUI:</label>
+								<label for="host_username">Логин Remnawave:</label>
 								<input type="text" id="host_username" name="host_username" required />
 							</div>
 							<div class="form-group password-wrapper">
-								<label for="host_pass">Пароль XUI:</label>
+								<label for="host_pass">Пароль Remnawave:</label>
 								<input type="password" id="host_pass" name="host_pass" required />
 								<button type="button" class="toggle-password">👁️</button>
 							</div>
@@ -144,11 +144,11 @@
 						</button>
 					</form>
 				</div>
-				<!-- Редактирование URL панели XUI -->
+				<!-- Редактирование URL панели Remnawave -->
 				<form action="{{ url_for('update_host_url_route') }}" method="post" class="form-inline edit-row" data-edit-row>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 					<input type="hidden" name="host_name" value="{{ host.host_name }}" />
-					<label class="form-label" for="host_url_{{ loop.index }}">URL панели XUI:</label>
+					<label class="form-label" for="host_url_{{ loop.index }}">URL панели Remnawave:</label>
 					<input id="host_url_{{ loop.index }}" class="form-control pill" type="text" name="host_url" value="{{ host.host_url or '' }}" data-edit-target readonly />
 					<div class="edit-actions">
 						<button type="button" class="btn btn-outline-secondary btn-sm pill" data-action="edit">Редактировать</button>
@@ -650,7 +650,7 @@
 							<input class="form-control" type="url" id="privacy_url" name="privacy_url" value="{{ settings.privacy_url or '' }}" />
 						</div>
 						<div class="mb-3">
-							<label class="form-label" for="support_user">URL поддержки (напр. https://t.me/T_Shift_Service)</label>
+							<label class="form-label" for="support_user">URL поддержки (напр. https://t.me/RemnawaveSupport)</label>
 							<input class="form-control" type="text" id="support_user" name="support_user" value="{{ settings.support_user or '' }}" />
 						</div>
 						<div class="mb-3">
@@ -740,3 +740,4 @@
 </script>
 
 {% endblock %}
+

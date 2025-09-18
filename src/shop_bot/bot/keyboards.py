@@ -5,7 +5,7 @@ from datetime import datetime
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from shop_bot.data_manager.database import get_setting
+from shop_bot.data_manager.remnawave_repository import get_setting
 
 logger = logging.getLogger(__name__)
 

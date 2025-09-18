@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import aiohttp
 import paramiko
 
-from shop_bot.data_manager import database
+from shop_bot.data_manager import remnawave_repository as rw_repo
 
 logger = logging.getLogger(__name__)
 
@@ -227,11 +227,11 @@ async def ssh_speedtest_for_host(host_row: dict) -> dict:
 
 
 async def run_and_store_net_probe(host_name: str) -> dict:
-    host = database.get_host(host_name)
+    host = rw_repo.get_host(host_name)
     if not host:
         return {'ok': False, 'error': 'host not found'}
     res = await net_probe_for_host(host)
-    database.insert_host_speedtest(
+    rw_repo.insert_host_speedtest(
         host_name=host_name,
         method='net',
         ping_ms=res.get('ping_ms'),
@@ -247,11 +247,11 @@ async def run_and_store_net_probe(host_name: str) -> dict:
 
 
 async def run_and_store_ssh_speedtest(host_name: str) -> dict:
-    host = database.get_host(host_name)
+    host = rw_repo.get_host(host_name)
     if not host:
         return {'ok': False, 'error': 'host not found'}
     res = await ssh_speedtest_for_host(host)
-    database.insert_host_speedtest(
+    rw_repo.insert_host_speedtest(
         host_name=host_name,
         method='ssh',
         ping_ms=res.get('ping_ms'),
@@ -326,7 +326,7 @@ async def auto_install_speedtest_on_host(host_name: str) -> dict:
     """Attempt to auto-install Ookla speedtest or speedtest-cli on remote host via SSH.
     Tries package manager scripts, falls back to pip speedtest-cli. Returns {'ok', 'log'}.
     """
-    host = database.get_host(host_name)
+    host = rw_repo.get_host(host_name)
     if not host:
         return {'ok': False, 'log': 'host not found'}
 

@@ -97,7 +97,7 @@
             <td>{{ k.user_id }}</td>
             <td>{{ k.host_name }}</td>
             <td>{{ k.key_email }}</td>
-            <td class="text-truncate" style="max-width:180px">{{ k.xui_client_uuid }}</td>
+            <td class="text-truncate" style="max-width:180px">{{ k.remnawave_user_uuid }}</td>
             <td>{{ k.expiry_date or '' }}</td>
             <td>{{ k.created_date or '' }}</td>
             <td>
@@ -140,7 +140,7 @@
   </div>
   <div id="toastErr" class="toast align-items-center text-bg-danger border-0 mt-2" role="alert" aria-live="assertive" aria-atomic="true">
     <div class="d-flex">
-      <div class="toast-body">Ошибка при выдаче ключа. Проверьте данные и доступность XUI.</div>
+      <div class="toast-body">Ошибка при выдаче ключа. Проверьте данные и доступность Remnawave.</div>
       <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
     </div>
   </div>
@@ -756,3 +756,5 @@
   })();
 </script>
 {% endblock %}
+
+

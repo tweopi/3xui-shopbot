@@ -1,12 +1,12 @@
 [project]
-name = "3xui-shopbot"
+name = "remnawave-shopbot"
 version = "1.3.0"
-description = "Бот для автоматической продажи VLESS VPN"
+description = "Remnawave Control Bot для автоматизации продаж VLESS VPN"
 dependencies = [
     "aiogram==3.21.0",
     "flask==3.1.1",
     "flask-wtf==1.2.1",
-    "py3xui==0.4.0",
+    "httpx==0.27.2",
     "pyotp==2.9.0",
     "python-dotenv==1.1.1",
     "qrcode[pil]==8.2",

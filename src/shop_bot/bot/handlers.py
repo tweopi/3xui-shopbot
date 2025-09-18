@@ -33,23 +33,24 @@ from aiogram.enums import ChatMemberStatus
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from shop_bot.bot import keyboards
-from shop_bot.modules import xui_api
-from shop_bot.data_manager.database import (
-    get_user, add_new_key, get_user_keys, update_user_stats,
-    register_user_if_not_exists, get_next_key_number, get_key_by_id,
-    update_key_info, set_trial_used, set_terms_agreed, get_setting, get_all_hosts,
+from shop_bot.modules import remnawave_api
+from shop_bot.data_manager import remnawave_repository as rw_repo
+from shop_bot.data_manager.remnawave_repository import (
+    get_user, get_user_keys, update_user_stats,
+    register_user_if_not_exists, get_next_key_number,
+    set_trial_used, set_terms_agreed, get_setting, get_all_hosts,
     get_plans_for_host, get_plan_by_id, log_transaction, get_referral_count,
     create_pending_transaction, get_all_users,
     create_support_ticket, add_support_message, get_user_tickets,
     get_ticket, get_ticket_messages, set_ticket_status, update_ticket_thread_info,
     get_ticket_by_thread,
-    update_key_host_and_info,
     get_balance, deduct_from_balance,
-    get_key_by_email, add_to_balance,
+    add_to_balance,
     add_to_referral_balance_all, get_referral_balance_all,
     get_referral_balance,
     is_admin,
     set_referral_start_bonus_received,
+    update_key_host_and_info,
 )
 
 from shop_bot.config import (
@@ -861,7 +862,7 @@ def get_user_router() -> Router:
             attempt = 1
             while True:
                 candidate_email = f"{candidate_local}@bot.local"
-                if not get_key_by_email(candidate_email):
+                if not rw_repo.get_key_by_email(candidate_email):
                     break
                 attempt += 1
                 candidate_local = f"{base_local}-{attempt}"
@@ -870,7 +871,7 @@ def get_user_router() -> Router:
                     candidate_email = f"{candidate_local}@bot.local"
                     break
 
-            result = await xui_api.create_or_update_key_on_host(
+            result = await remnawave_api.create_or_update_key_on_host(
                 host_name=host_name,
                 email=candidate_email,
                 days_to_add=int(get_setting("trial_duration_days"))
@@ -881,12 +882,10 @@ def get_user_router() -> Router:
 
             set_trial_used(user_id)
             
-            new_key_id = add_new_key(
+            new_key_id = rw_repo.record_key_from_payload(
                 user_id=user_id,
+                payload=result,
                 host_name=host_name,
-                xui_client_uuid=result['client_uuid'],
-                key_email=result['email'],
-                expiry_timestamp_ms=result['expiry_timestamp_ms']
             )
             
             await message.delete()
@@ -904,14 +903,14 @@ def get_user_router() -> Router:
         key_id_to_show = int(callback.data.split("_")[2])
         await callback.message.edit_text("Загружаю информацию о ключе...")
         user_id = callback.from_user.id
-        key_data = get_key_by_id(key_id_to_show)
+        key_data = rw_repo.get_key_by_id(key_id_to_show)
 
         if not key_data or key_data['user_id'] != user_id:
             await callback.message.edit_text("❌ Ошибка: ключ не найден.")
             return
             
         try:
-            details = await xui_api.get_key_details_from_host(key_data)
+            details = await remnawave_api.get_key_details_from_host(key_data)
             if not details or not details['connection_string']:
                 await callback.message.edit_text("❌ Ошибка на сервере. Не удалось получить данные ключа.")
                 return
@@ -943,7 +942,7 @@ def get_user_router() -> Router:
             await callback.answer("Некорректный идентификатор ключа.", show_alert=True)
             return
 
-        key_data = get_key_by_id(key_id)
+        key_data = rw_repo.get_key_by_id(key_id)
         if not key_data or key_data.get('user_id') != callback.from_user.id:
             await callback.answer("Ключ не найден.", show_alert=True)
             return
@@ -980,7 +979,7 @@ def get_user_router() -> Router:
             return
         new_host_name = parts[1]
 
-        key_data = get_key_by_id(key_id)
+        key_data = rw_repo.get_key_by_id(key_id)
 
         if not key_data or key_data.get('user_id') != callback.from_user.id:
             await callback.answer("Ключ не найден.", show_alert=True)
@@ -1010,7 +1009,7 @@ def get_user_router() -> Router:
         email = key_data.get('key_email')
         try:
             # Передаём точный expiry_timestamp_ms, чтобы не увеличивать срок на панели при переносе
-            result = await xui_api.create_or_update_key_on_host(
+            result = await remnawave_api.create_or_update_key_on_host(
                 new_host_name,
                 email,
                 days_to_add=None,
@@ -1024,7 +1023,7 @@ def get_user_router() -> Router:
 
             # Сначала удаляем на старом сервере, пока локально сохранен старый UUID по email
             try:
-                await xui_api.delete_client_on_host(old_host, email)
+                await remnawave_api.delete_client_on_host(old_host, email)
             except Exception:
                 pass
 
@@ -1032,14 +1031,14 @@ def get_user_router() -> Router:
             update_key_host_and_info(
                 key_id=key_id,
                 new_host_name=new_host_name,
-                new_xui_uuid=result['client_uuid'],
+                new_remnawave_uuid=result['client_uuid'],
                 new_expiry_ms=result['expiry_timestamp_ms']
             )
 
             # Показываем сразу обновлённые данные ключа
             try:
-                updated_key = get_key_by_id(key_id)
-                details = await xui_api.get_key_details_from_host(updated_key)
+                updated_key = rw_repo.get_key_by_id(key_id)
+                details = await remnawave_api.get_key_details_from_host(updated_key)
                 if details and details.get('connection_string'):
                     connection_string = details['connection_string']
                     expiry_date = datetime.fromisoformat(updated_key['expiry_date'])
@@ -1075,11 +1074,11 @@ def get_user_router() -> Router:
     async def show_qr_handler(callback: types.CallbackQuery):
         await callback.answer("Генерирую QR-код...")
         key_id = int(callback.data.split("_")[2])
-        key_data = get_key_by_id(key_id)
+        key_data = rw_repo.get_key_by_id(key_id)
         if not key_data or key_data['user_id'] != callback.from_user.id: return
         
         try:
-            details = await xui_api.get_key_details_from_host(key_data)
+            details = await remnawave_api.get_key_details_from_host(key_data)
             if not details or not details['connection_string']:
                 await callback.answer("Ошибка: Не удалось сгенерировать QR-код.", show_alert=True)
                 return
@@ -1237,7 +1236,7 @@ def get_user_router() -> Router:
             await callback.message.edit_text("❌ Произошла ошибка. Неверный формат ключа.")
             return
 
-        key_data = get_key_by_id(key_id)
+        key_data = rw_repo.get_key_by_id(key_id)
 
         if not key_data or key_data['user_id'] != callback.from_user.id:
             await callback.message.edit_text("❌ Ошибка: Ключ не найден или не принадлежит вам.")
@@ -1808,7 +1807,7 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             attempt = 1
             while True:
                 candidate_email = f"{candidate_local}@bot.local"
-                if not get_key_by_email(candidate_email):
+                if not rw_repo.get_key_by_email(candidate_email):
                     break
                 attempt += 1
                 candidate_local = f"{base_local}-{attempt}"
@@ -1818,31 +1817,38 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                     break
         else:
             # Продление существующего ключа — достаём email по key_id
-            existing_key = get_key_by_id(key_id)
+            existing_key = rw_repo.get_key_by_id(key_id)
             if not existing_key or not existing_key.get('key_email'):
                 await processing_message.edit_text("❌ Не удалось найти ключ для продления.")
                 return
             candidate_email = existing_key['key_email']
 
-        result = await xui_api.create_or_update_key_on_host(
+        result = await remnawave_api.create_or_update_key_on_host(
             host_name=host_name,
             email=candidate_email,
             days_to_add=int(months * 30)
         )
         if not result:
-            await processing_message.edit_text("❌ Не удалось создать/обновить ключ в панели.")
+            await processing_message.edit_text("❌ Не удалось создать/обновить ключ на панели Remnawave.")
             return
 
         if action == "new":
-            key_id = add_new_key(
+            key_id = rw_repo.record_key_from_payload(
                 user_id=user_id,
+                payload=result,
                 host_name=host_name,
-                xui_client_uuid=result['client_uuid'],
-                key_email=result['email'],
-                expiry_timestamp_ms=result['expiry_timestamp_ms']
             )
+            if not key_id:
+                await processing_message.edit_text("❌ Не удалось сохранить ключ. Попробуйте позже.")
+                return
         elif action == "extend":
-            update_key_info(key_id, result['client_uuid'], result['expiry_timestamp_ms'])
+            if not rw_repo.update_key(
+                key_id,
+                remnawave_user_uuid=result['client_uuid'],
+                expire_at_ms=result['expiry_timestamp_ms'],
+            ):
+                await processing_message.edit_text("❌ Не удалось обновить информацию о ключе. Попробуйте позже.")
+                return
 
             user_data = get_user(user_id)
             referrer_id = user_data.get('referred_by')
@@ -1974,3 +1980,4 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                 await bot.send_message(chat_id=user_id, text="❌ Ошибка при выдаче ключа.")
             except Exception:
                 pass
+

@@ -19,14 +19,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
-from shop_bot.modules import xui_api
+from shop_bot.modules import remnawave_api
 from shop_bot.bot import handlers
 from shop_bot.bot import keyboards
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from shop_bot.support_bot_controller import SupportBotController
 from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager import backup_manager
-from shop_bot.data_manager.database import (
+from shop_bot.data_manager import remnawave_repository as rw_repo
+from shop_bot.data_manager.remnawave_repository import (
     get_all_settings, update_setting, get_all_hosts, get_plans_for_host,
     create_host, delete_host, create_plan, delete_plan, update_plan, get_user_count,
     get_total_keys_count, get_total_spent_sum, get_daily_stats_for_charts,
@@ -36,9 +37,9 @@ from shop_bot.data_manager.database import (
     add_support_message, set_ticket_status, delete_ticket,
     get_closed_tickets_count, get_all_tickets_count, update_host_subscription_url,
     update_host_url, update_host_name, update_host_ssh_settings, get_latest_speedtest, get_speedtests,
-    get_all_keys, get_keys_for_user, get_key_by_id, delete_key_by_id, update_key_comment, update_key_info,
-    add_new_key, get_balance, adjust_user_balance, get_referrals_for_user,
-    get_user, get_key_by_email
+    get_all_keys, get_keys_for_user, delete_key_by_id, update_key_comment,
+    get_balance, adjust_user_balance, get_referrals_for_user,
+    get_user
 )
 
 _bot_controller = None
@@ -158,7 +159,7 @@ def create_webhook_app(bot_controller_instance):
             "open_tickets_count": open_tickets_count,
             "closed_tickets_count": closed_tickets_count,
             "all_tickets_count": all_tickets_count,
-            "brand_title": settings.get('panel_brand_title') or 'T‑Shift VPN',
+            "brand_title": settings.get('panel_brand_title') or 'Remnawave Control',
         }
 
     @flask_app.route('/brand-title', methods=['POST'])
@@ -411,7 +412,7 @@ def create_webhook_app(bot_controller_instance):
         try:
             user_id = int(request.form.get('user_id'))
             host_name = (request.form.get('host_name') or '').strip()
-            xui_uuid = (request.form.get('xui_client_uuid') or '').strip()
+            Remnawave_uuid = (request.form.get('Remnawave_client_uuid') or '').strip()
             key_email = (request.form.get('key_email') or '').strip()
             expiry = request.form.get('expiry_date') or ''
             # ожидаем datetime-local, конвертируем в ms
@@ -421,28 +422,32 @@ def create_webhook_app(bot_controller_instance):
             flash('Проверьте поля ключа.', 'danger')
             return redirect(request.referrer or url_for('admin_keys_page'))
         # Если UUID не указан — генерируем автоматически, как при выдаче ключа в боте
-        if not xui_uuid:
-            xui_uuid = str(uuid.uuid4())
-        # 1) Создать/обновить клиента на XUI-хосте
+        if not Remnawave_uuid:
+            Remnawave_uuid = str(uuid.uuid4())
+        # 1) Создать/обновить клиента на Remnawave-хосте
         result = None
         try:
-            result = asyncio.run(xui_api.create_or_update_key_on_host(host_name, key_email, expiry_timestamp_ms=expiry_ms or None))
+            result = asyncio.run(remnawave_api.create_or_update_key_on_host(host_name, key_email, expiry_timestamp_ms=expiry_ms or None))
         except Exception as e:
             logger.error(f"Не удалось создать/обновить ключ на хосте: {e}")
             result = None
         if not result:
-            flash('Не удалось создать ключ на хосте. Проверьте доступность XUI.', 'danger')
+            flash('Не удалось создать ключ на хосте. Проверьте доступность Remnawave.', 'danger')
             return redirect(request.referrer or url_for('admin_keys_page'))
 
         # Обновляем UUID и expiry на основании ответа панели
         try:
-            xui_uuid = result.get('client_uuid') or xui_uuid
+            Remnawave_uuid = result.get('client_uuid') or Remnawave_uuid
             expiry_ms = result.get('expiry_timestamp_ms') or expiry_ms
         except Exception:
             pass
 
         # 2) Сохранить в БД
-        new_id = add_new_key(user_id, host_name, xui_uuid, key_email, expiry_ms or 0)
+        new_id = rw_repo.record_key_from_payload(
+            user_id=user_id,
+            payload=result,
+            host_name=host_name,
+        )
         flash(('Ключ добавлен.' if new_id else 'Ошибка при добавлении ключа.'), 'success' if new_id else 'danger')
 
         # 3) Уведомление пользователю в Telegram (без email, с пометкой, что ключ выдан администратором)
@@ -475,7 +480,7 @@ def create_webhook_app(bot_controller_instance):
         try:
             user_id = int(request.form.get('user_id'))
             host_name = (request.form.get('host_name') or '').strip()
-            xui_uuid = (request.form.get('xui_client_uuid') or '').strip()
+            Remnawave_uuid = (request.form.get('Remnawave_client_uuid') or '').strip()
             key_email = (request.form.get('key_email') or '').strip()
             expiry = request.form.get('expiry_date') or ''
             from datetime import datetime
@@ -483,11 +488,11 @@ def create_webhook_app(bot_controller_instance):
         except Exception as e:
             return jsonify({"ok": False, "error": f"invalid input: {e}"}), 400
 
-        if not xui_uuid:
-            xui_uuid = str(uuid.uuid4())
+        if not Remnawave_uuid:
+            Remnawave_uuid = str(uuid.uuid4())
 
         try:
-            result = asyncio.run(xui_api.create_or_update_key_on_host(host_name, key_email, expiry_timestamp_ms=expiry_ms or None))
+            result = asyncio.run(remnawave_api.create_or_update_key_on_host(host_name, key_email, expiry_timestamp_ms=expiry_ms or None))
         except Exception as e:
             result = None
             logger.error(f"create_key_ajax_route: ошибка панели/хоста: {e}")
@@ -495,7 +500,11 @@ def create_webhook_app(bot_controller_instance):
             return jsonify({"ok": False, "error": "host_failed"}), 500
 
         # sync DB
-        new_id = add_new_key(user_id, host_name, result.get('client_uuid') or xui_uuid, key_email, result.get('expiry_timestamp_ms') or expiry_ms or 0)
+        new_id = rw_repo.record_key_from_payload(
+            user_id=user_id,
+            payload=result,
+            host_name=host_name,
+        )
 
         # notify user (без email, с пометкой про администратора)
         try:
@@ -545,7 +554,7 @@ def create_webhook_app(bot_controller_instance):
             attempt = 1
             while True:
                 candidate_email = f"{candidate_local}@bot.local"
-                if not get_key_by_email(candidate_email):
+                if not rw_repo.get_key_by_email(candidate_email):
                     break
                 attempt += 1
                 candidate_local = f"{base_local}-{attempt}"
@@ -558,10 +567,10 @@ def create_webhook_app(bot_controller_instance):
     def delete_key_route(key_id: int):
         # пытаемся удалить с сервера и из БД
         try:
-            key = get_key_by_id(key_id)
+            key = rw_repo.get_key_by_id(key_id)
             if key:
                 try:
-                    asyncio.run(xui_api.delete_client_on_host(key['host_name'], key['key_email']))
+                    asyncio.run(remnawave_api.delete_client_on_host(key['host_name'], key['key_email']))
                 except Exception:
                     pass
         except Exception:
@@ -577,7 +586,7 @@ def create_webhook_app(bot_controller_instance):
             delta_days = int(request.form.get('delta_days', '0'))
         except Exception:
             return jsonify({"ok": False, "error": "invalid_delta"}), 400
-        key = get_key_by_id(key_id)
+        key = rw_repo.get_key_by_id(key_id)
         if not key:
             return jsonify({"ok": False, "error": "not_found"}), 404
         try:
@@ -599,9 +608,9 @@ def create_webhook_app(bot_controller_instance):
             new_dt = exp_dt + timedelta(days=delta_days)
             new_ms = int(new_dt.timestamp() * 1000)
 
-            # 1) Применяем новый срок на 3xui (чтобы дата в панели совпадала с реальной)
+            # 1) Применяем новый срок на Remnawave (чтобы дата в панели совпадала с реальной)
             try:
-                result = asyncio.run(xui_api.create_or_update_key_on_host(
+                result = asyncio.run(remnawave_api.create_or_update_key_on_host(
                     host_name=key.get('host_name'),
                     email=key.get('key_email'),
                     expiry_timestamp_ms=new_ms
@@ -609,11 +618,17 @@ def create_webhook_app(bot_controller_instance):
             except Exception as e:
                 result = None
             if not result or not result.get('expiry_timestamp_ms'):
-                return jsonify({"ok": False, "error": "xui_update_failed"}), 500
+                return jsonify({"ok": False, "error": "remnawave_update_failed"}), 500
 
             # 2) Сохраняем в БД (обновляем UUID, если изменился, и дату истечения)
-            client_uuid = result.get('client_uuid') or key.get('xui_client_uuid') or ''
-            update_key_info(key_id, client_uuid, int(result.get('expiry_timestamp_ms')))
+            client_uuid = result.get('client_uuid') or key.get('remnawave_user_uuid') or ''
+            if not rw_repo.update_key(
+                key_id,
+                remnawave_user_uuid=client_uuid,
+                expire_at_ms=int(result.get('expiry_timestamp_ms') or new_ms),
+                subscription_url=result.get('subscription_url') or result.get('connection_string'),
+            ):
+                return jsonify({"ok": False, "error": "db_update_failed"}), 500
 
             # Уведомим пользователя о продлении/сокращении срока
             try:
@@ -672,7 +687,7 @@ def create_webhook_app(bot_controller_instance):
             # Истёкший — пробуем удалить на сервере и в БД, уведомляем пользователя
             try:
                 try:
-                    asyncio.run(xui_api.delete_client_on_host(k.get('host_name'), k.get('key_email')))
+                    asyncio.run(remnawave_api.delete_client_on_host(k.get('host_name'), k.get('key_email')))
                 except Exception:
                     pass
                 delete_key_by_id(k.get('key_id'))
@@ -1345,7 +1360,7 @@ def create_webhook_app(bot_controller_instance):
         total = len(keys_to_revoke)
 
         for key in keys_to_revoke:
-            result = asyncio.run(xui_api.delete_client_on_host(key['host_name'], key['key_email']))
+            result = asyncio.run(remnawave_api.delete_client_on_host(key['host_name'], key['key_email']))
             if result:
                 success_count += 1
 
@@ -1590,3 +1605,5 @@ def create_webhook_app(bot_controller_instance):
             return 'Error', 500
 
     return flask_app
+
+

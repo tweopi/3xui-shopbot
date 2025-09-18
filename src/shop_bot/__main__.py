@@ -12,7 +12,7 @@ except Exception:
 
 from shop_bot.webhook_server.app import create_webhook_app
 from shop_bot.data_manager.scheduler import periodic_subscription_check
-from shop_bot.data_manager import database
+from shop_bot.data_manager import remnawave_repository as rw_repo
 from shop_bot.bot_controller import BotController
 
 def main():
@@ -100,7 +100,7 @@ def main():
     aio_event_logger.addFilter(RussianizeAiogramFilter())
     logger = logging.getLogger(__name__)
 
-    database.initialize_db()
+    rw_repo.initialize_db()
     logger.info("Проверка инициализации базы данных завершена.")
 
     bot_controller = BotController()

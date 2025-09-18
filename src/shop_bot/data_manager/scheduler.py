@@ -7,11 +7,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram import Bot
 
 from shop_bot.bot_controller import BotController
-from shop_bot.data_manager import database
+from shop_bot.data_manager import remnawave_repository as rw_repo
 from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager import backup_manager
 
-from shop_bot.modules import xui_api
+from shop_bot.modules import remnawave_api
 from shop_bot.bot import keyboards
 
 CHECK_INTERVAL_SECONDS = 300
@@ -95,7 +95,7 @@ def _cleanup_notified_users(all_db_keys: list[dict]):
 async def check_expiring_subscriptions(bot: Bot):
     logger.debug("Scheduler: Проверяю истекающие подписки...")
     current_time = datetime.now()
-    all_keys = database.get_all_keys()
+    all_keys = rw_repo.get_all_keys()
     
     _cleanup_notified_users(all_keys)
     
@@ -124,135 +124,168 @@ async def check_expiring_subscriptions(bot: Bot):
             logger.error(f"Scheduler: Ошибка обработки истечения для ключа {key.get('key_id')}: {e}")
 
 async def sync_keys_with_panels():
-    logger.debug("Scheduler: Запускаю синхронизацию с XUI-панелями...")
+    logger.debug("Scheduler: Запускаю синхронизацию с Remnawave API...")
     total_affected_records = 0
-    
-    all_hosts = database.get_all_hosts()
-    if not all_hosts:
-        logger.debug("Scheduler: Хосты в базе не настроены. Синхронизация пропущена.")
+
+    squads = rw_repo.list_squads()
+    if not squads:
+        logger.debug("Scheduler: Сквады Remnawave не настроены. Синхронизация пропущена.")
         return
 
-    for host in all_hosts:
-        host_name = host['host_name']
-        logger.debug(f"Scheduler: Обрабатываю хост: '{host_name}'")
-        
+    for squad in squads:
+        host_name = (squad.get('host_name') or squad.get('name') or '').strip() or 'unknown'
+        squad_uuid = (squad.get('squad_uuid') or squad.get('squadUuid') or '').strip()
+        if not squad_uuid:
+            logger.warning("Scheduler: Сквад '%s' не имеет squad_uuid — пропускаю синхронизацию.", host_name)
+            continue
+
         try:
-            api, inbound = xui_api.login_to_host(
-                host_url=host['host_url'],
-                username=host['host_username'],
-                password=host['host_pass'],
-                inbound_id=host['host_inbound_id']
-            )
+            remote_users = await remnawave_api.list_users(squad_uuid=squad_uuid)
+        except Exception as exc:
+            logger.error("Scheduler: Не удалось получить пользователей Remnawave для '%s': %s", host_name, exc)
+            continue
 
-            if not api or not inbound:
-                logger.error(f"Scheduler: Не удалось авторизоваться на хосте '{host_name}'. Пропускаю его.")
+        remote_by_email: dict[str, tuple[str, dict]] = {}
+        for remote_user in remote_users or []:
+            raw_email = (remote_user.get('email') or remote_user.get('accountEmail') or '').strip()
+            if not raw_email:
                 continue
-            
-            full_inbound_details = api.inbound.get_by_id(inbound.id)
-            clients_on_server = {client.email: client for client in (full_inbound_details.settings.clients or [])}
-            logger.debug(f"Scheduler: Найдено клиентов на панели '{host_name}': {len(clients_on_server)}")
+            remote_by_email[raw_email.lower()] = (raw_email, remote_user)
 
-            keys_in_db = database.get_keys_for_host(host_name)
-            
-            for db_key in keys_in_db:
-                key_email = db_key['key_email']
-                expiry_date = datetime.fromisoformat(db_key['expiry_date'])
-                now = datetime.now()
-                if expiry_date < now - timedelta(days=5):
-                    logger.debug(f"Scheduler: Ключ '{key_email}' просрочен более 5 дней. Удаляю с панели и из БД.")
+        keys_in_db = rw_repo.get_keys_for_host(host_name) or []
+        now = datetime.now()
+
+        for db_key in keys_in_db:
+            raw_email = (db_key.get('key_email') or db_key.get('email') or '').strip()
+            normalized_email = raw_email.lower()
+            if not raw_email:
+                continue
+
+            remote_entry = remote_by_email.pop(normalized_email, None)
+            remote_email = None
+            remote_user = None
+            if remote_entry:
+                remote_email, remote_user = remote_entry
+
+            expiry_raw = db_key.get('expiry_date') or db_key.get('expire_at')
+            try:
+                expiry_date = datetime.fromisoformat(str(expiry_raw)) if expiry_raw else None
+            except Exception:
+                try:
+                    expiry_date = datetime.fromisoformat(str(expiry_raw).replace('Z', '+00:00'))
+                except Exception:
+                    expiry_date = None
+
+            if expiry_date and expiry_date < now - timedelta(days=5):
+                logger.debug(
+                    "Scheduler: Ключ '%s' (host '%s') просрочен более 5 дней. Удаляю пользователя из Remnawave и БД.",
+                    raw_email,
+                    host_name,
+                )
+                try:
+                    await remnawave_api.delete_client_on_host(host_name, remote_email or raw_email)
+                except Exception as exc:
+                    logger.error(
+                        "Scheduler: Не удалось удалить пользователя '%s' из Remnawave: %s",
+                        raw_email,
+                        exc,
+                    )
+                if rw_repo.delete_key_by_email(raw_email):
+                    total_affected_records += 1
+                continue
+
+            if remote_user:
+                expire_value = remote_user.get('expireAt') or remote_user.get('expiryDate')
+                remote_dt = None
+                if expire_value:
                     try:
-                        await xui_api.delete_client_on_host(host_name, key_email)
-                    except Exception as e:
-                        logger.error(f"Scheduler: Не удалось удалить клиента '{key_email}' с панели: {e}")
-                    deleted = database.delete_key_by_email(key_email)
-                    if deleted:
+                        remote_dt = datetime.fromisoformat(str(expire_value).replace('Z', '+00:00'))
+                    except Exception:
+                        remote_dt = None
+                local_ms = int(expiry_date.timestamp() * 1000) if expiry_date else None
+                remote_ms = int(remote_dt.timestamp() * 1000) if remote_dt else None
+                subscription_url = remnawave_api.extract_subscription_url(remote_user)
+                local_subscription = db_key.get('subscription_url') or db_key.get('connection_string')
+
+                needs_update = False
+                if remote_ms is not None and local_ms is not None and abs(remote_ms - local_ms) > 1000:
+                    needs_update = True
+                if subscription_url and subscription_url != local_subscription:
+                    needs_update = True
+
+                if needs_update:
+                    if rw_repo.update_key_status_from_server(raw_email, remote_user):
                         total_affected_records += 1
-                        logger.debug(f"Scheduler: Ключ '{key_email}' удалён из локальной БД после очистки панели.")
-                    else:
-                        logger.warning(f"Scheduler: Попытка удалить ключ '{key_email}' из локальной БД — записей не затронуто.")
-                    continue
-
-                server_client = clients_on_server.pop(key_email, None)
-
-                if server_client:
-                    reset_days = server_client.reset if server_client.reset is not None else 0
-                    server_expiry_ms = server_client.expiry_time + reset_days * 24 * 3600 * 1000
-                    local_expiry_dt = expiry_date
-                    local_expiry_ms = int(local_expiry_dt.timestamp() * 1000)
-
-                    if abs(server_expiry_ms - local_expiry_ms) > 1000:
-                        database.update_key_status_from_server(key_email, server_client)
-                        total_affected_records += 1
-                        logger.debug(f"Scheduler: Синхронизирован ключ '{key_email}' для хоста '{host_name}' (обновлён).")
-                else:
-                    logger.warning(f"Scheduler: Ключ '{key_email}' для хоста '{host_name}' не найден на сервере. Помечаю к удалению в локальной БД.")
-                    database.update_key_status_from_server(key_email, None)
+                        logger.debug(
+                            "Scheduler: Обновлён ключ '%s' на основе данных Remnawave (host '%s').",
+                            raw_email,
+                            host_name,
+                        )
+            else:
+                logger.warning(
+                    "Scheduler: Ключ '%s' (host '%s') отсутствует в Remnawave. Помечаю к удалению в локальной БД.",
+                    raw_email,
+                    host_name,
+                )
+                if rw_repo.update_key_status_from_server(raw_email, None):
                     total_affected_records += 1
 
-            if clients_on_server:
-                # Try to attach orphan clients from panel to local DB so old keys get subscriptions
-                for orphan_email, orphan_client in clients_on_server.items():
-                    try:
-                        # Extract user_id from email like: user12345-key1-...@telegram.bot
-                        import re
-                        m = re.search(r"user(\d+)", orphan_email)
-                        user_id = int(m.group(1)) if m else None
-                        if not user_id:
-                            logger.warning(
-                                f"Scheduler: Найден осиротевший клиент '{orphan_email}' на '{host_name}', но не удалось определить user_id — пропускаю."
-                            )
-                            continue
+        if remote_by_email:
+            for normalized_email, (remote_email, remote_user) in remote_by_email.items():
+                import re
 
-                        # Check that user exists
-                        usr = database.get_user(user_id)
-                        if not usr:
-                            logger.warning(
-                                f"Scheduler: Осиротевший клиент '{orphan_email}' указывает на user_id={user_id}, но пользователь не найден — пропускаю."
-                            )
-                            continue
+                match = re.search(r"user(\d+)", remote_email)
+                user_id = int(match.group(1)) if match else None
+                if not user_id:
+                    logger.warning(
+                        "Scheduler: Осиротевший пользователь '%s' в Remnawave не содержит user_id — пропускаю.",
+                        remote_email,
+                    )
+                    continue
 
-                        # If key already present (race/duplicate), skip insert
-                        existing = database.get_key_by_email(orphan_email)
-                        if existing:
-                            continue
+                if not rw_repo.get_user(user_id):
+                    logger.warning(
+                        "Scheduler: Осиротевший пользователь '%s' ссылается на несуществующего user_id=%s.",
+                        remote_email,
+                        user_id,
+                    )
+                    continue
 
-                        reset_days = getattr(orphan_client, 'reset', 0) or 0
-                        expiry_ms = int(getattr(orphan_client, 'expiry_time', 0)) + int(reset_days) * 24 * 3600 * 1000
-                        client_uuid = getattr(orphan_client, 'id', None) or getattr(orphan_client, 'email', None) or ''
+                if rw_repo.get_key_by_email(remote_email):
+                    continue
 
-                        if not client_uuid:
-                            logger.warning(
-                                f"Scheduler: У осиротевшего клиента '{orphan_email}' нет UUID/id — не могу привязать."
-                            )
-                            continue
+                payload = dict(remote_user)
+                payload.setdefault('host_name', host_name)
+                payload.setdefault('squad_uuid', squad_uuid)
+                payload.setdefault('squadUuid', squad_uuid)
 
-                        new_id = database.add_new_key(
-                            user_id=user_id,
-                            host_name=host_name,
-                            xui_client_uuid=str(client_uuid),
-                            key_email=orphan_email,
-                            expiry_timestamp_ms=expiry_ms,
-                        )
-                        if new_id:
-                            logger.info(
-                                f"Scheduler: Осиротевший клиент '{orphan_email}' на '{host_name}' привязан к пользователю {user_id} как key_id={new_id}."
-                            )
-                            total_affected_records += 1
-                        else:
-                            logger.warning(
-                                f"Scheduler: Не удалось привязать осиротевшего клиента '{orphan_email}' на '{host_name}'."
-                            )
-                    except Exception as e:
-                        logger.error(
-                            f"Scheduler: Ошибка при попытке привязать осиротевшего клиента '{orphan_email}' на '{host_name}': {e}",
-                            exc_info=True,
-                        )
+                new_id = rw_repo.record_key_from_payload(
+                    user_id=user_id,
+                    payload=payload,
+                    host_name=host_name,
+                    description=payload.get('description'),
+                    tag=payload.get('tag'),
+                )
+                if new_id:
+                    total_affected_records += 1
+                    logger.info(
+                        "Scheduler: Привязал осиротевшего пользователя '%s' (host '%s') к user_id=%s как key_id=%s.",
+                        remote_email,
+                        host_name,
+                        user_id,
+                        new_id,
+                    )
+                else:
+                    logger.warning(
+                        "Scheduler: Не удалось привязать осиротевшего пользователя '%s' (host '%s').",
+                        remote_email,
+                        host_name,
+                    )
 
-        except Exception as e:
-            logger.error(f"Scheduler: Непредвиденная ошибка при обработке хоста '{host_name}': {e}", exc_info=True)
-            
-    logger.debug(f"Scheduler: Синхронизация с XUI-панелями завершена. Затронуто записей: {total_affected_records}.")
-
+    logger.debug(
+        "Scheduler: Синхронизация с Remnawave API завершена. Затронуто записей: %s.",
+        total_affected_records,
+    )
 async def periodic_subscription_check(bot_controller: BotController):
     logger.info("Scheduler: Планировщик фоновых задач запущен.")
     await asyncio.sleep(10)
@@ -296,7 +329,7 @@ async def _maybe_run_periodic_speedtests():
         logger.error(f"Scheduler: Ошибка запуска speedtests: {e}", exc_info=True)
 
 async def _run_speedtests_for_all_hosts():
-    hosts = database.get_all_hosts()
+    hosts = rw_repo.get_all_hosts()
     if not hosts:
         logger.debug("Scheduler: Нет хостов для измерений скорости.")
         return
@@ -330,7 +363,7 @@ async def _maybe_run_daily_backup(bot: Bot):
     now = datetime.now()
     # Считаем интервал из настроек (в днях). 0 или пусто — автобэкап выключен.
     try:
-        s = database.get_setting("backup_interval_days") or "1"
+        s = rw_repo.get_setting("backup_interval_days") or "1"
         days = int(str(s).strip() or "1")
     except Exception:
         days = 1
@@ -354,3 +387,6 @@ async def _maybe_run_daily_backup(bot: Bot):
         _last_backup_run_at = now
     except Exception as e:
         logger.error(f"Scheduler: Критическая ошибка при создании и отправке бэкапа: {e}", exc_info=True)
+
+
+

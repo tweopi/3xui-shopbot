@@ -14,17 +14,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from shop_bot.bot import keyboards
 from shop_bot.data_manager import speedtest_runner
-from shop_bot.data_manager.database import (
+from shop_bot.data_manager import remnawave_repository as rw_repo
+from shop_bot.data_manager.remnawave_repository import (
     get_all_users,
     get_setting,
     get_user,
     get_keys_for_user,
-    get_key_by_id,
-    update_key_email,
-    update_key_host,
     create_gift_key,
-    add_new_key,
-    get_key_by_email,
     get_all_hosts,
     add_to_balance,
     deduct_from_balance,
@@ -33,7 +29,6 @@ from shop_bot.data_manager.database import (
     delete_key_by_email,
     get_admin_stats,
     get_keys_for_host,
-    update_key_info,
     is_admin,
     get_referral_count,
     get_referral_balance_all,
@@ -41,7 +36,7 @@ from shop_bot.data_manager.database import (
 )
 from shop_bot.data_manager import backup_manager
 from shop_bot.bot.handlers import show_main_menu
-from shop_bot.modules.xui_api import create_or_update_key_on_host, delete_client_on_host
+from shop_bot.modules.remnawave_api import create_or_update_key_on_host, delete_client_on_host
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +136,7 @@ def get_admin_router() -> Router:
 
         # Уведомление всем администраторам о старте
         try:
-            from shop_bot.data_manager.database import get_admin_ids
+            from shop_bot.data_manager.remnawave_repository import get_admin_ids
             admin_ids = list({*(get_admin_ids() or []), int(callback.from_user.id)})
         except Exception:
             admin_ids = [int(callback.from_user.id)]
@@ -224,7 +219,7 @@ def get_admin_router() -> Router:
         await callback.answer()
         # оповещение админам
         try:
-            from shop_bot.data_manager.database import get_admin_ids
+            from shop_bot.data_manager.remnawave_repository import get_admin_ids
             admin_ids = list({*(get_admin_ids() or []), int(callback.from_user.id)})
         except Exception:
             admin_ids = [int(callback.from_user.id)]
@@ -450,7 +445,7 @@ def get_admin_router() -> Router:
             await callback.message.answer(f"🚫 Пользователь {user_id} забанен")
             try:
                 # Уведомление пользователю: только кнопка поддержки, без "Назад в меню"
-                from shop_bot.data_manager.database import get_setting as _get_setting
+                from shop_bot.data_manager.remnawave_repository import get_setting as _get_setting
                 support = (_get_setting("support_bot_username") or _get_setting("support_user") or "").strip()
                 kb = InlineKeyboardBuilder()
                 url = None
@@ -531,7 +526,7 @@ def get_admin_router() -> Router:
             return
         await callback.answer()
         try:
-            from shop_bot.data_manager.database import get_admin_ids
+            from shop_bot.data_manager.remnawave_repository import get_admin_ids
             ids = list(get_admin_ids() or [])
         except Exception:
             ids = []
@@ -698,7 +693,7 @@ def get_admin_router() -> Router:
         except Exception:
             await callback.message.answer("❌ Неверный формат key_id")
             return
-        key = get_key_by_id(key_id)
+        key = rw_repo.get_key_by_id(key_id)
         if not key:
             await callback.message.answer("❌ Ключ не найден")
             return
@@ -734,7 +729,7 @@ def get_admin_router() -> Router:
         except Exception:
             await callback.message.answer("❌ Неверный формат key_id")
             return
-        key = get_key_by_id(key_id)
+        key = rw_repo.get_key_by_id(key_id)
         if not key:
             await callback.message.answer("❌ Ключ не найден")
             return
@@ -792,7 +787,7 @@ def get_admin_router() -> Router:
         if days <= 0:
             await message.answer("❌ Дней должно быть положительное число")
             return
-        key = get_key_by_id(key_id)
+        key = rw_repo.get_key_by_id(key_id)
         if not key:
             await message.answer("❌ Ключ не найден")
             await state.clear()
@@ -813,13 +808,16 @@ def get_admin_router() -> Router:
             await message.answer("❌ Не удалось продлить ключ на сервере")
             return
         # Обновление в БД
-        try:
-            update_key_info(key_id, resp['client_uuid'], int(resp['expiry_timestamp_ms']))
-        except Exception as e:
-            logger.error(f"Admin key extend: DB update failed for key #{key_id}: {e}")
+        if not rw_repo.update_key(
+            key_id,
+            remnawave_user_uuid=resp['client_uuid'],
+            expire_at_ms=int(resp['expiry_timestamp_ms']),
+        ):
+            await message.answer("❌ Не удалось обновить информацию о ключе.")
+            return
         await state.clear()
         # Повторный показ карточки ключа
-        new_key = get_key_by_id(key_id)
+        new_key = rw_repo.get_key_by_id(key_id)
         text = (
             f"🔑 <b>Ключ #{key_id}</b>\n"
             f"Хост: {new_key.get('host_name') or '—'}\n"
@@ -891,7 +889,7 @@ def get_admin_router() -> Router:
             return
         # Обновляем настройки админов
         try:
-            from shop_bot.data_manager.database import get_admin_ids, update_setting
+            from shop_bot.data_manager.remnawave_repository import get_admin_ids, update_setting
             ids = set(get_admin_ids())
             ids.add(int(target_id))
             # Сохраняем в admin_telegram_ids строкой CSV
@@ -969,7 +967,7 @@ def get_admin_router() -> Router:
             return
         # Обновляем настройки админов
         try:
-            from shop_bot.data_manager.database import get_admin_ids, update_setting
+            from shop_bot.data_manager.remnawave_repository import get_admin_ids, update_setting
             ids = set(get_admin_ids())
             if target_id not in ids:
                 await message.answer(f"ℹ️ Пользователь {target_id} не является администратором.")
@@ -1010,7 +1008,7 @@ def get_admin_router() -> Router:
             key_id = int(callback.data.split("_")[-1])
         except Exception:
             return
-        key = get_key_by_id(key_id)
+        key = rw_repo.get_key_by_id(key_id)
         if not key:
             return
         text = (
@@ -1048,7 +1046,7 @@ def get_admin_router() -> Router:
             await callback.message.answer("❌ Неверный формат key_id")
             return
         try:
-            key = get_key_by_id(key_id)
+            key = rw_repo.get_key_by_id(key_id)
         except Exception as e:
             logger.error(f"DB get_key_by_id failed for #{key_id}: {e}")
             key = None
@@ -1171,7 +1169,7 @@ def get_admin_router() -> Router:
         if not new_host:
             await message.answer("❌ Введите корректное имя сервера")
             return
-        ok = update_key_host(key_id, new_host)
+        ok = rw_repo.update_key(key_id, host_name=new_host)
         if ok:
             await message.answer("✅ Сервер обновлён")
         else:
@@ -1321,7 +1319,7 @@ def get_admin_router() -> Router:
         attempt = 1
         while True:
             candidate_email = f"{candidate_local}@bot.local"
-            existing = get_key_by_email(candidate_email)
+            existing = rw_repo.get_key_by_email(candidate_email)
             if not existing:
                 break
             attempt += 1
@@ -1340,7 +1338,7 @@ def get_admin_router() -> Router:
             logging.error(f"Gift flow: failed to create client on host '{host_name}' for user {user_id}: {e}")
 
         if not host_resp or not host_resp.get("client_uuid") or not host_resp.get("expiry_timestamp_ms"):
-            await message.answer("❌ Не удалось выдать ключ на сервере. Проверьте настройки хоста и доступность панели XUI.")
+            await message.answer("❌ Не удалось выдать ключ на сервере. Проверьте настройки хоста и доступность панели Remnawave.")
             await state.clear()
             await show_admin_menu(message)
             return
@@ -1349,7 +1347,11 @@ def get_admin_router() -> Router:
         expiry_ms = int(host_resp["expiry_timestamp_ms"])  # в мс
         connection_link = host_resp.get("connection_string")
 
-        key_id = add_new_key(user_id, host_name, client_uuid, generated_email, expiry_ms)
+        key_id = rw_repo.record_key_from_payload(
+            user_id=user_id,
+            payload=host_resp,
+            host_name=host_name,
+        )
         if key_id:
             username_readable = (user.get('username') or '').strip()
             user_part = f"{user_id} (@{username_readable})" if username_readable else f"{user_id}"
@@ -1489,7 +1491,7 @@ def get_admin_router() -> Router:
         except Exception:
             await callback.message.answer("❌ Неверный формат key_id")
             return
-        key = get_key_by_id(key_id)
+        key = rw_repo.get_key_by_id(key_id)
         if not key:
             await callback.message.answer("❌ Ключ не найден")
             return
@@ -1718,10 +1720,10 @@ def get_admin_router() -> Router:
         # сначала попробуем как ID
         try:
             key_id = int(text)
-            key = get_key_by_id(key_id)
+            key = rw_repo.get_key_by_id(key_id)
         except Exception:
             # затем как email
-            key = get_key_by_email(text)
+            key = rw_repo.get_key_by_email(text)
         if not key:
             await message.answer("❌ Ключ не найден. Пришлите корректный key_id или email.")
             return
@@ -1767,7 +1769,7 @@ def get_admin_router() -> Router:
         if days <= 0:
             await message.answer("❌ Количество дней должно быть положительным")
             return
-        key = get_key_by_id(key_id)
+        key = rw_repo.get_key_by_id(key_id)
         if not key:
             await message.answer("❌ Ключ не найден")
             return
@@ -1786,10 +1788,13 @@ def get_admin_router() -> Router:
             await message.answer("❌ Не удалось продлить ключ на сервере")
             return
         # Обновим в БД
-        try:
-            update_key_info(key_id, resp['client_uuid'], int(resp['expiry_timestamp_ms']))
-        except Exception as e:
-            logger.error(f"Extend flow: failed update DB for key #{key_id}: {e}")
+        if not rw_repo.update_key(
+            key_id,
+            remnawave_user_uuid=resp['client_uuid'],
+            expire_at_ms=int(resp['expiry_timestamp_ms']),
+        ):
+            await message.answer("❌ Не удалось обновить информацию о ключе.")
+            return
         await state.clear()
         await message.answer(f"✅ Ключ #{key_id} продлён на {days} дн.")
         # Попробуем уведомить пользователя
@@ -1980,3 +1985,6 @@ def get_admin_router() -> Router:
             await message.answer(f"Ошибка: {e}")
 
     return admin_router
+
+
+

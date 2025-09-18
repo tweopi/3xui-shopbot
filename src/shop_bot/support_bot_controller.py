@@ -5,8 +5,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from shop_bot.data_manager import database
-from shop_bot.data_manager.database import get_admin_ids
+from shop_bot.data_manager import remnawave_repository as rw_repo
+from shop_bot.data_manager.remnawave_repository import get_admin_ids
 from shop_bot.support_bot.handlers import get_support_router
 
 logger = logging.getLogger(__name__)
@@ -51,10 +51,10 @@ class SupportBotController:
         if not self._loop or not self._loop.is_running():
             return {"status": "error", "message": "Критическая ошибка: цикл событий не установлен."}
 
-        token = database.get_setting("support_bot_token")
-        bot_username = database.get_setting("support_bot_username")
+        token = rw_repo.get_setting("support_bot_token")
+        bot_username = rw_repo.get_setting("support_bot_username")
         # допускаем отсутствие одиночного admin_telegram_id, если настроены admin_telegram_ids
-        admin_id = database.get_setting("admin_telegram_id")
+        admin_id = rw_repo.get_setting("admin_telegram_id")
         admin_ids = get_admin_ids()
 
         if not all([token, bot_username]) or (not admin_id and not admin_ids):

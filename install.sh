@@ -23,7 +23,7 @@ REPO_URL="https://github.com/tweopi/3xui-shopbot.git"
 PROJECT_DIR="3xui-shopbot"
 NGINX_CONF_FILE="/etc/nginx/sites-available/${PROJECT_DIR}.conf"
 
-echo -e "${GREEN}--- Запуск скрипта установки/обновления 3xui-ShopBot ---${NC}"
+echo -e "${GREEN}--- Запуск скрипта установки/обновления Remnawave ShopBot ---${NC}"
 
 if [ -f "$NGINX_CONF_FILE" ]; then
     echo -e "\n${CYAN}Обнаружена существующая конфигурация. Скрипт запущен в режиме обновления.${NC}"
@@ -87,7 +87,7 @@ if [ ! -d "$PROJECT_DIR" ]; then
     git clone $REPO_URL
 fi
 cd $PROJECT_DIR
-echo -e "${GREEN}✔ Репозиторий готов.${NC}"
+echo -e "${GREEN}✔ Репозиторий Remnawave ShopBot готов.${NC}"
 
 echo -e "\n${CYAN}Шаг 3: Настройка домена и получение SSL-сертификатов...${NC}"
 
