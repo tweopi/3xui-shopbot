@@ -119,7 +119,7 @@
 2) Выполните:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/tweopi/remnawave-shopbot/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/tweopi/remnawave-shopbot/install.sh | sudo bash
 ```
 
 3) Следуйте инструкциям установщика:
