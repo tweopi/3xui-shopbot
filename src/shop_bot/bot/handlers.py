@@ -18,7 +18,7 @@ from io import BytesIO
 from datetime import datetime, timedelta
 from aiosend import CryptoPay, TESTNET
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict
+from typing import Dict, Optional
 
 from pytonconnect import TonConnect
 from pytonconnect.exceptions import UserRejectsError
@@ -459,13 +459,22 @@ def get_user_router() -> Router:
             "key_id": None,
         }
         try:
-            pay_url = await _create_heleket_payment_request(
-                user_id=user_id,
-                price=float(amount),
-                months=0,
-                host_name="",
-                state_data=state_data
-            )
+            if callback.data == "topup_pay_cryptobot":
+                pay_url = await _create_cryptobot_invoice(
+                    user_id=user_id,
+                    price_rub=float(amount),
+                    months=0,
+                    host_name="",
+                    state_data=state_data,
+                )
+            else:
+                pay_url = await _create_heleket_payment_request(
+                    user_id=user_id,
+                    price=float(amount),
+                    months=0,
+                    host_name="",
+                    state_data=state_data,
+                )
             if pay_url:
                 await callback.message.edit_text(
                     "Нажмите на кнопку ниже для оплаты:",
@@ -474,8 +483,9 @@ def get_user_router() -> Router:
                 await state.clear()
             else:
                 await callback.message.edit_text("❌ Не удалось создать счёт. Попробуйте другой способ оплаты.")
+                await state.clear()
         except Exception as e:
-            logger.error(f"Failed to create topup Heleket-like invoice: {e}", exc_info=True)
+            logger.error(f"Failed to create topup invoice: {e}", exc_info=True)
             await callback.message.edit_text("❌ Не удалось создать счёт. Попробуйте другой способ оплаты.")
             await state.clear()
 
@@ -1538,18 +1548,9 @@ def get_user_router() -> Router:
             await callback.message.edit_text("❌ Произошла ошибка при выборе тарифа.")
             await state.clear()
             return
-        
-        plan_id = data.get('plan_id')
-        plan = get_plan_by_id(plan_id)
-
-        if not plan:
-            await callback.message.answer("Произошла ошибка при выборе тарифа.")
-            await state.clear()
-            return
 
         base_price = Decimal(str(plan['price']))
         price_rub_decimal = base_price
-
         if user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
             discount_percentage_str = get_setting("referral_discount") or "0"
             discount_percentage = Decimal(discount_percentage_str)
@@ -1557,15 +1558,15 @@ def get_user_router() -> Router:
                 discount_amount = (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
                 price_rub_decimal = base_price - discount_amount
         months = plan['months']
-        
+
         final_price_float = float(price_rub_decimal)
 
-        pay_url = await _create_heleket_payment_request(
+        pay_url = await _create_cryptobot_invoice(
             user_id=callback.from_user.id,
-            price=final_price_float,
+            price_rub=final_price_float,
             months=plan['months'],
             host_name=data.get('host_name'),
-            state_data=data
+            state_data=data,
         )
         
         if pay_url:
@@ -1575,7 +1576,7 @@ def get_user_router() -> Router:
             )
             await state.clear()
         else:
-            await callback.message.edit_text("❌ Не удалось создать счет Heleket. Попробуйте другой способ оплаты.")
+            await callback.message.edit_text("❌ Не удалось создать счет CryptoBot. Попробуйте другой способ оплаты.")
 
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_tonconnect")
     async def create_ton_invoice_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -1689,6 +1690,243 @@ def get_user_router() -> Router:
     
 
     return user_router
+
+async def _create_heleket_payment_request(
+    user_id: int,
+    price: float,
+    months: int,
+    host_name: str,
+    state_data: dict,
+) -> Optional[str]:
+    """Создать счёт через Heleket и вернуть ссылку на оплату.
+
+    Формирует payload с подписью по той же схеме, которой пользуется вебхук:
+    sign = md5( base64( json.dumps(data_sorted) ) + api_key ).
+
+    Возвращает URL на оплату или None при ошибке.
+    """
+    try:
+        merchant_id = get_setting("heleket_merchant_id")
+        api_key = get_setting("heleket_api_key")
+        if not merchant_id or not api_key:
+            logger.error("Heleket: отсутствуют merchant_id/api_key в настройках.")
+            return None
+
+        # Метаданные, которые затем будут разобраны в webhook (`description` JSON)
+        metadata = {
+            "payment_id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "months": months,
+            "price": float(price),
+            "action": state_data.get("action"),
+            "key_id": state_data.get("key_id"),
+            "host_name": host_name,
+            "plan_id": state_data.get("plan_id"),
+            "customer_email": state_data.get("customer_email"),
+            "payment_method": "Crypto",
+        }
+
+        # Базовые поля счёта для Heleket
+        dom_val = get_setting("domain")
+        domain = (dom_val or "").strip() if isinstance(dom_val, str) else dom_val
+        callback_url = None
+        try:
+            if domain:
+                callback_url = f"{str(domain).rstrip('/')}/heleket-webhook"
+        except Exception:
+            callback_url = None
+
+        # Укажем success_url как возврат в бота
+        success_url = None
+        try:
+            if TELEGRAM_BOT_USERNAME:
+                success_url = f"https://t.me/{TELEGRAM_BOT_USERNAME}"
+        except Exception:
+            success_url = None
+
+        data: Dict[str, object] = {
+            "merchant_id": merchant_id,
+            "order_id": str(uuid.uuid4()),
+            "amount": float(price),
+            "currency": "RUB",
+            "description": json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
+        }
+        if callback_url:
+            data["callback_url"] = callback_url
+        if success_url:
+            data["success_url"] = success_url
+
+        # Формируем подпись в соответствии с обработчиком вебхука
+        sorted_data_str = json.dumps(data, sort_keys=True, separators=(",", ":"))
+        base64_encoded = base64.b64encode(sorted_data_str.encode()).decode()
+        raw_string = f"{base64_encoded}{api_key}"
+        sign = hashlib.md5(raw_string.encode()).hexdigest()
+
+        payload = dict(data)
+        payload["sign"] = sign
+
+        # Базовый URL API Heleket. Делаем настраиваемым через (необязательную) настройку heleket_api_base.
+        api_base_val = get_setting("heleket_api_base")
+        api_base = (api_base_val or "https://api.heleket.com").rstrip("/")
+        endpoint = f"{api_base}/invoice/create"
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(endpoint, json=payload, timeout=15) as resp:
+                    text = await resp.text()
+                    if resp.status not in (200, 201):
+                        logger.error(f"Heleket: не удалось создать счёт (HTTP {resp.status}): {text}")
+                        return None
+                    try:
+                        data_json = await resp.json()
+                    except Exception:
+                        # Если провайдер вернул не JSON
+                        logger.warning(f"Heleket: неожиданный ответ (не JSON): {text}")
+                        return None
+                    pay_url = (
+                        data_json.get("payment_url")
+                        or data_json.get("pay_url")
+                        or data_json.get("url")
+                    )
+                    if not pay_url:
+                        logger.error(f"Heleket: не найдено поле URL в ответе: {data_json}")
+                        return None
+                    return str(pay_url)
+            except Exception as e:
+                logger.error(f"Heleket: ошибка HTTP при создании счёта: {e}", exc_info=True)
+                return None
+    except Exception as e:
+        logger.error(f"Heleket: общая ошибка при создании счёта: {e}", exc_info=True)
+        return None
+
+async def _create_cryptobot_invoice(
+    user_id: int,
+    price_rub: float,
+    months: int,
+    host_name: str,
+    state_data: dict,
+) -> Optional[str]:
+    """Создать счёт в Telegram Crypto Pay и вернуть ссылку на оплату.
+
+    - Конвертирует RUB в USDT по рыночному курсу.
+    - Формирует payload в формате, ожидаемом обработчиком вебхука `/cryptobot-webhook`:
+      `user_id:months:price:action:key_id:host_name:plan_id:customer_email:payment_method`.
+    """
+    try:
+        token = get_setting("cryptobot_token")
+        if not token:
+            logger.error("CryptoBot: не задан cryptobot_token")
+            return None
+
+        rate = await get_usdt_rub_rate()
+        if not rate or rate <= 0:
+            logger.error("CryptoBot: не удалось получить курс USDT/RUB")
+            return None
+
+        amount_usdt = (Decimal(str(price_rub)) / rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # Собираем payload для вебхука
+        payload_parts = [
+            str(user_id),
+            str(months),
+            str(float(price_rub)),
+            str(state_data.get("action")),
+            str(state_data.get("key_id")),
+            str(host_name or ""),
+            str(state_data.get("plan_id")),
+            str(state_data.get("customer_email")),
+            "CryptoBot",
+        ]
+        payload = ":".join(payload_parts)
+
+        cp = CryptoPay(token)
+        # Пытаемся создать инвойс в USDT; описание — краткое
+        invoice = await cp.create_invoice(
+            asset="USDT",
+            amount=float(amount_usdt),
+            description="VPN оплата",
+            payload=payload,
+        )
+
+        pay_url = None
+        try:
+            # У разных обёрток могут отличаться имена полей
+            pay_url = getattr(invoice, "pay_url", None) or getattr(invoice, "bot_invoice_url", None)
+        except Exception:
+            pass
+        if not pay_url and isinstance(invoice, dict):
+            pay_url = invoice.get("pay_url") or invoice.get("bot_invoice_url") or invoice.get("url")
+        if not pay_url:
+            logger.error(f"CryptoBot: не удалось получить ссылку на оплату из ответа: {invoice}")
+            return None
+        return str(pay_url)
+    except Exception as e:
+        logger.error(f"CryptoBot: ошибка при создании счёта: {e}", exc_info=True)
+        return None
+
+async def get_usdt_rub_rate() -> Optional[Decimal]:
+    """Получить курс USDT→RUB. Возвращает Decimal или None при ошибке."""
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=rub"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    logger.warning(f"USDT/RUB: HTTP {resp.status}")
+                    return None
+                data = await resp.json()
+                val = data.get("tether", {}).get("rub")
+                if val is None:
+                    return None
+                return Decimal(str(val))
+    except Exception as e:
+        logger.warning(f"USDT/RUB: ошибка получения курса: {e}")
+        return None
+
+async def get_ton_usdt_rate() -> Optional[Decimal]:
+    """Получить курс TON→USDT (через USD). Возвращает Decimal или None при ошибке."""
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=toncoin&vs_currencies=usd"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    logger.warning(f"TON/USD: HTTP {resp.status}")
+                    return None
+                data = await resp.json()
+                usd = data.get("toncoin", {}).get("usd")
+                if usd is None:
+                    return None
+                return Decimal(str(usd))
+    except Exception as e:
+        logger.warning(f"TON/USD: ошибка получения курса: {e}")
+        return None
+
+async def _start_ton_connect_process(user_id: int, transaction_payload: Dict) -> str:
+    """Упростённый генератор deep‑link для TON перевода.
+
+    Вместо полноценного протокола TON Connect формируем ссылку вида:
+    ton://transfer/<address>?amount=<nanoton>&text=<payload>
+    Поддерживается большинством TON-кошельков и удобна для QR.
+    """
+    try:
+        messages = transaction_payload.get("messages") or []
+        if not messages:
+            raise ValueError("transaction_payload.messages is empty")
+        msg = messages[0]
+        address = msg.get("address")
+        amount = msg.get("amount")  # в нанотонах как строка
+        payload_text = msg.get("payload") or ""
+        if not address or not amount:
+            raise ValueError("address/amount are required in transaction message")
+        # Сформируем ton://transfer ...
+        params = {"amount": amount}
+        if payload_text:
+            params["text"] = str(payload_text)
+        query = urlencode(params)
+        return f"ton://transfer/{address}?{query}"
+    except Exception as e:
+        logger.error(f"TON deep link generation failed: {e}")
+        # Фолбэк: без параметров
+        return "ton://transfer"
 
 async def notify_admin_of_purchase(bot: Bot, metadata: dict):
     try:
