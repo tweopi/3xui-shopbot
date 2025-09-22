@@ -756,7 +756,7 @@ def get_admin_stats() -> dict:
 
             # income: consider common success markers (total)
             cursor.execute(
-                "SELECT COALESCE(SUM(amount_rub), 0) FROM transactions WHERE status IN ('paid','success','succeeded')"
+                "SELECT COALESCE(SUM(amount_rub), 0) FROM transactions WHERE status IN ('paid','success','succeeded') AND LOWER(COALESCE(payment_method, '')) <> 'balance'"
             )
             row = cursor.fetchone()
             stats["total_income"] = float(row[0] or 0.0) if row else 0.0
@@ -775,6 +775,7 @@ def get_admin_stats() -> dict:
                 SELECT COALESCE(SUM(amount_rub), 0)
                 FROM transactions
                 WHERE status IN ('paid','success','succeeded')
+                  AND LOWER(COALESCE(payment_method, '')) <> 'balance'
                   AND date(created_date) = date('now')
                 """
             )
@@ -1288,6 +1289,7 @@ def get_total_spent_sum() -> float:
                 SELECT COALESCE(SUM(amount_rub), 0.0)
                 FROM transactions
                 WHERE LOWER(COALESCE(status, '')) IN ('paid', 'completed', 'success')
+                  AND LOWER(COALESCE(payment_method, '')) <> 'balance'
                 """
             )
             val = cursor.fetchone()
