@@ -614,6 +614,52 @@
 				</div>
 			</section>
 
+      <h3 class="h4">Telegram Stars</h3>
+<div class="mb-3">
+  <input type="hidden" name="stars_enabled" value="false" />
+  <div class="form-check">
+    <input class="form-check-input" type="checkbox" id="stars_enabled" name="stars_enabled" value="true" {% if settings.stars_enabled == 'true' %}checked{% endif %}>
+    <label class="form-check-label" for="stars_enabled">Включить оплату в Telegram Stars</label>
+  </div>
+</div>
+<div class="mb-3">
+  <label class="form-label" for="stars_per_rub">Курс Stars за 1 RUB</label>
+  <div class="input-group with-suffix">
+    <input class="form-control pill-md" type="number" step="0.01" min="0" id="stars_per_rub" name="stars_per_rub" value="{{ settings.stars_per_rub or '1' }}" />
+    <span class="input-group-text">⭐</span>
+  </div>
+  <div class="form-text text-secondary">Сколько звёзд списывать за 1 рубль. Например, 1.5 означает 1.5⭐ за 1 RUB.</div>
+</div>
+<div class="mb-3">
+  <label class="form-label" for="stars_title">Заголовок инвойса Stars</label>
+  <input class="form-control" type="text" id="stars_title" name="stars_title" value="{{ settings.stars_title or '' }}" />
+</div>
+<div class="mb-3">
+  <label class="form-label" for="stars_description">Описание инвойса Stars</label>
+  <input class="form-control" type="text" id="stars_description" name="stars_description" value="{{ settings.stars_description or '' }}" />
+</div>
+
+<h3 class="h4">Настройка YooMoney</h3>
+<div class="mb-3">
+  <input type="hidden" name="yoomoney_enabled" value="false" />
+  <div class="form-check">
+    <input class="form-check-input" type="checkbox" id="yoomoney_enabled" name="yoomoney_enabled" value="true" {% if settings.yoomoney_enabled == 'true' %}checked{% endif %}>
+    <label class="form-check-label" for="yoomoney_enabled">Включить оплату через YooMoney (кошелёк)</label>
+  </div>
+</div>
+<div class="mb-3">
+  <label class="form-label" for="yoomoney_wallet">Кошелёк YooMoney</label>
+  <input class="form-control" type="text" id="yoomoney_wallet" name="yoomoney_wallet" value="{{ settings.yoomoney_wallet or '' }}" />
+</div>
+<div class="mb-3 password-wrapper">
+  <label class="form-label" for="yoomoney_api_token">API Token YooMoney</label>
+  <div class="d-flex gap-2">
+    <input class="form-control" type="password" id="yoomoney_api_token" name="yoomoney_api_token" value="{{ settings.yoomoney_api_token or '' }}" />
+    <button type="button" class="btn btn-outline-secondary toggle-password">👁️</button>
+  </div>
+</div>
+
+
 			<section class="settings-section" id="content">
 				<div class="card">
 					<div class="card-header"><h2 class="card-title">Настройки Контента</h2></div>
@@ -763,9 +809,9 @@
 			</section>
 
 			<input type="hidden" id="settings-next-hash" name="next_hash" />
-			<button type="submit" class="btn btn-primary">
-				Сохранить все настройки
-			</button>
+			<div class="text-end mt-3">
+				<button type="submit" class="btn btn-primary">Сохранить все настройки</button>
+			</div>
 		        </form>
     </div>
 </div>

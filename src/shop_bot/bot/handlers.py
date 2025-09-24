@@ -5,7 +5,6 @@ import qrcode
 import aiohttp
 import re
 import aiohttp
-import hashlib
 import json
 import base64
 import asyncio
@@ -22,7 +21,6 @@ from typing import Dict, Optional
 
 from pytonconnect import TonConnect
 from pytonconnect.exceptions import UserRejectsError
-
 from aiogram import Bot, Router, F, types, html
 from aiogram.types import BufferedInputFile
 from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
@@ -52,10 +50,20 @@ from shop_bot.data_manager.database import (
     set_referral_start_bonus_received,
     find_and_complete_pending_transaction,
 )
+from shop_bot.config import (
+    CHOOSE_PLAN_MESSAGE,
+    CHOOSE_PAYMENT_METHOD_MESSAGE,
+    VPN_INACTIVE_TEXT,
+    VPN_NO_DATA_TEXT,
+    get_profile_text,
+    get_vpn_active_text,
+    get_key_info_text,
+    get_purchase_success_text,
+)
 
-TELEGRAM_BOT_USERNAME = None
-PAYMENT_METHODS = None
-ADMIN_ID = None  # устаревшее: используйте is_admin()
+TELEGRAM_BOT_USERNAME = get_setting("telegram_bot_username")
+PAYMENT_METHODS: dict = {}
+ADMIN_ID = int(get_setting("admin_id")) if get_setting("admin_id") else None
 CRYPTO_BOT_TOKEN = get_setting("cryptobot_token")
 
 logger = logging.getLogger(__name__)
