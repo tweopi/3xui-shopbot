@@ -438,7 +438,7 @@ def get_user_router() -> Router:
                         "description": f"Пополнение баланса",
                         "quantity": "1.00",
                         "amount": {"value": price_str_for_api, "currency": "RUB"},
-                        "vat_code": "1",
+                        "vat_code": 1,
                         "payment_subject": "service",
                         "payment_mode": "full_payment"
                     }]
@@ -450,8 +450,8 @@ def get_user_router() -> Router:
                 "capture": True,
                 "description": f"Пополнение баланса на {price_str_for_api} RUB",
                 "metadata": {
-                    "user_id": user_id,
-                    "price": price_float_for_metadata,
+                    "user_id": str(user_id),
+                    "price": f"{price_float_for_metadata:.2f}",
                     "action": "top_up",
                     "payment_method": "YooKassa"
                 }
@@ -1649,7 +1649,7 @@ def get_user_router() -> Router:
                         "description": f"Подписка на {months} мес.",
                         "quantity": "1.00",
                         "amount": {"value": price_str_for_api, "currency": "RUB"},
-                        "vat_code": "1",
+                        "vat_code": 1,
                         "payment_subject": "service",
                         "payment_mode": "full_payment"
                     }]
@@ -1660,9 +1660,10 @@ def get_user_router() -> Router:
                 "capture": True,
                 "description": f"Подписка на {months} мес.",
                 "metadata": {
-                    "user_id": user_id, "months": months, "price": price_float_for_metadata, 
-                    "action": action, "key_id": key_id, "host_name": host_name,
-                    "plan_id": plan_id, "customer_email": customer_email,
+                    "user_id": str(user_id), "months": str(months), "price": f"{price_float_for_metadata:.2f}", 
+                    "action": str(action) if action is not None else "",
+                    "key_id": (str(key_id) if key_id is not None else ""), "host_name": str(host_name) if host_name is not None else "",
+                    "plan_id": (str(plan_id) if plan_id is not None else ""), "customer_email": customer_email or "",
                     "payment_method": "YooKassa"
                 }
             }
