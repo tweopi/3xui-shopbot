@@ -28,7 +28,6 @@ from aiogram.types import BufferedInputFile
 from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ChatMemberStatus
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -50,11 +49,7 @@ from shop_bot.data_manager.database import (
     get_referral_balance,
     is_admin,
     set_referral_start_bonus_received,
-)
-
-from shop_bot.config import (
-    get_profile_text, get_vpn_active_text, VPN_INACTIVE_TEXT, VPN_NO_DATA_TEXT,
-    get_key_info_text, CHOOSE_PAYMENT_METHOD_MESSAGE, get_purchase_success_text
+    find_and_complete_pending_transaction,
 )
 
 TELEGRAM_BOT_USERNAME = None
@@ -98,7 +93,8 @@ async def show_main_menu(message: types.Message, edit_message: bool = False):
     trial_available = not (user_db_data and user_db_data.get('trial_used'))
     is_admin_flag = is_admin(user_id)
 
-    text = "🏠 <b>Главное меню</b>\n\nВыберите действие:"
+    custom_main_text = get_setting("main_menu_text")
+    text = (custom_main_text or "🏠 <b>Главное меню</b>\n\nВыберите действие:")
     keyboard = keyboards.create_main_menu_keyboard(user_keys, trial_available, is_admin_flag)
     # Отправляем только текст без фотографии
     if edit_message:
@@ -149,6 +145,28 @@ def registration_required(f):
 
 def get_user_router() -> Router:
     user_router = Router()
+
+    # Helpers for Telegram Stars
+    def _get_stars_rate() -> Decimal:
+        try:
+            rate_raw = get_setting("stars_per_rub") or "1"
+            rate = Decimal(str(rate_raw))
+            if rate <= 0:
+                rate = Decimal("1")
+            return rate
+        except Exception:
+            return Decimal("1")
+
+    def _calc_stars_amount(amount_rub: Decimal) -> int:
+        rate = _get_stars_rate()
+        try:
+            stars = (amount_rub * rate).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        except Exception:
+            stars = (amount_rub * rate)
+        try:
+            return int(stars)
+        except Exception:
+            return int(float(stars))
 
     @user_router.message(CommandStart())
     async def start_handler(message: types.Message, state: FSMContext, bot: Bot, command: CommandObject):
@@ -411,7 +429,9 @@ def get_user_router() -> Router:
                         "description": f"Пополнение баланса",
                         "quantity": "1.00",
                         "amount": {"value": price_str_for_api, "currency": "RUB"},
-                        "vat_code": "1"
+                        "vat_code": "1",
+                        "payment_subject": "service",
+                        "payment_mode": "full_payment"
                     }]
                 }
 
@@ -439,6 +459,120 @@ def get_user_router() -> Router:
             logger.error(f"Failed to create YooKassa topup payment: {e}", exc_info=True)
             await callback.message.answer("Не удалось создать ссылку на оплату.")
             await state.clear()
+
+    @user_router.callback_query(TopUpProcess.waiting_for_topup_method, F.data == "topup_pay_yoomoney")
+    async def topup_pay_yoomoney(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer("Готовлю ЮMoney…")
+        data = await state.get_data()
+        amount = Decimal(str(data.get('topup_amount', 0)))
+        if amount <= 0:
+            await callback.message.edit_text("❌ Некорректная сумма пополнения. Повторите ввод.")
+            await state.clear()
+            return
+        ym_wallet = (get_setting("yoomoney_wallet") or "").strip()
+        if not ym_wallet:
+            await callback.message.edit_text("❌ Оплата через ЮMoney временно недоступна.")
+            await state.clear()
+            return
+        user_id = callback.from_user.id
+        payment_id = str(uuid.uuid4())
+        metadata = {
+            "payment_id": payment_id,
+            "user_id": user_id,
+            "price": float(amount),
+            "action": "top_up",
+            "payment_method": "YooMoney",
+        }
+        try:
+            create_pending_transaction(payment_id, user_id, float(amount), metadata)
+        except Exception as e:
+            logger.warning(f"YooMoney topup: failed to create pending transaction: {e}")
+        try:
+            success_url = f"https://t.me/{TELEGRAM_BOT_USERNAME}" if TELEGRAM_BOT_USERNAME else None
+        except Exception:
+            success_url = None
+        pay_url = _build_yoomoney_quickpay_url(
+            wallet=ym_wallet,
+            amount=float(amount),
+            label=payment_id,
+            success_url=success_url,
+            targets=f"Пополнение на {amount:.2f} RUB",
+        )
+        await state.clear()
+        await callback.message.edit_text(
+            "Нажмите на кнопку ниже для оплаты. После оплаты нажмите 'Проверить оплату':",
+            reply_markup=keyboards.create_payment_with_check_keyboard(pay_url, f"check_yoomoney_{payment_id}")
+        )
+
+    @user_router.callback_query(F.data.startswith("check_yoomoney_"))
+    async def check_yoomoney_status(callback: types.CallbackQuery, bot: Bot):
+        await callback.answer("Проверяю оплату…")
+        payment_id = callback.data[len("check_yoomoney_"):]
+        if not payment_id:
+            await callback.message.edit_text("❌ Некорректные данные для проверки.")
+            return
+        op = await _yoomoney_find_payment(payment_id)
+        if not op:
+            await callback.message.edit_text("Платёж не найден или не завершён. Подождите и попробуйте ещё раз.")
+            return
+        # Завершим pending‑транзакцию и извлечём метаданные
+        try:
+            amount_rub = float(op.get('amount', 0)) if isinstance(op.get('amount', 0), (int, float)) else None
+        except Exception:
+            amount_rub = None
+        md = find_and_complete_pending_transaction(
+            payment_id=payment_id,
+            amount_rub=amount_rub,
+            payment_method="YooMoney",
+            currency_name="RUB",
+            amount_currency=None,
+        )
+        if not md:
+            await callback.message.edit_text("❌ Не удалось завершить транзакцию. Обратитесь в поддержку, если средства списаны.")
+            return
+        try:
+            await process_successful_payment(bot, md)
+        except Exception as e:
+            logger.error(f"YooMoney: process_successful_payment failed: {e}", exc_info=True)
+            try:
+                await callback.message.edit_text("❌ Ошибка при выдаче после оплаты. Напишите в поддержку.")
+            except Exception:
+                pass
+            return
+
+    @user_router.callback_query(TopUpProcess.waiting_for_topup_method, F.data == "topup_pay_stars")
+    async def topup_pay_stars(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+        await callback.answer("Готовлю счёт в Stars…")
+        data = await state.get_data()
+        amount_rub = Decimal(str(data.get('topup_amount', 0)))
+        if amount_rub <= 0:
+            await callback.message.edit_text("❌ Некорректная сумма пополнения. Повторите ввод.")
+            await state.clear()
+            return
+        stars_count = _calc_stars_amount(amount_rub.quantize(Decimal("0.01")))
+        payload = json.dumps({
+            "user_id": callback.from_user.id,
+            "price": float(amount_rub),
+            "action": "top_up",
+            "payment_method": "Stars"
+        }, ensure_ascii=False)
+        title = (get_setting("stars_title") or "Пополнение баланса")
+        description = (get_setting("stars_description") or f"Пополнение на {amount_rub} RUB")
+        try:
+            await bot.send_invoice(
+                chat_id=callback.message.chat.id,
+                title=title,
+                description=description,
+                payload=payload,
+                currency="XTR",
+                prices=[types.LabeledPrice(label="Пополнение", amount=stars_count)],
+            )
+            await state.clear()
+        except Exception as e:
+            logger.error(f"Failed to send Stars topup invoice: {e}")
+            await callback.message.edit_text("❌ Не удалось создать счёт Stars. Попробуйте другой способ оплаты.")
+            await state.clear()
+            return
 
     @user_router.callback_query(TopUpProcess.waiting_for_topup_method, (F.data == "topup_pay_cryptobot") | (F.data == "topup_pay_heleket"))
     async def topup_pay_heleket_like(callback: types.CallbackQuery, state: FSMContext):
@@ -1144,16 +1278,18 @@ def get_user_router() -> Router:
         await callback.answer()
         try:
             await callback.message.edit_text(
-                "<b>Подключение на Android</b>\n\n"
-                "1. <b>Установите приложение V2RayTun:</b> Загрузите и установите приложение V2RayTun из Google Play Store.\n"
-                "2. <b>Скопируйте свой ключ (vless://)</b> Перейдите в раздел «Моя подписка» в нашем боте и скопируйте свой ключ.\n"
-                "3. <b>Импортируйте конфигурацию:</b>\n"
-                "   • Откройте V2RayTun.\n"
-                "   • Нажмите на значок + в правом нижнем углу.\n"
-                "   • Выберите «Импортировать конфигурацию из буфера обмена» (или аналогичный пункт).\n"
-                "4. <b>Выберите сервер:</b> Выберите появившийся сервер в списке.\n"
-                "5. <b>Подключитесь к VPN:</b> Нажмите на кнопку подключения (значок «V» или воспроизведения). Возможно, потребуется разрешение на создание VPN-подключения.\n"
-                "6. <b>Проверьте подключение:</b> После подключения проверьте свой IP-адрес, например, на https://whatismyipaddress.com/. Он должен отличаться от вашего реального IP.",
+                (get_setting("howto_android_text") or (
+                    "<b>Подключение на Android</b>\n\n"
+                    "1. <b>Установите приложение V2RayTun:</b> Загрузите и установите приложение V2RayTun из Google Play Store.\n"
+                    "2. <b>Скопируйте свой ключ (vless://)</b> Перейдите в раздел «Моя подписка» в нашем боте и скопируйте свой ключ.\n"
+                    "3. <b>Импортируйте конфигурацию:</b>\n"
+                    "   • Откройте V2RayTun.\n"
+                    "   • Нажмите на значок + в правом нижнем углу.\n"
+                    "   • Выберите «Импортировать конфигурацию из буфера обмена» (или аналогичный пункт).\n"
+                    "4. <b>Выберите сервер:</b> Выберите появившийся сервер в списке.\n"
+                    "5. <b>Подключитесь к VPN:</b> Нажмите на кнопку подключения (значок «V» или воспроизведения). Возможно, потребуется разрешение на создание VPN-подключения.\n"
+                    "6. <b>Проверьте подключение:</b> После подключения проверьте свой IP-адрес, например, на https://whatismyipaddress.com/. Он должен отличаться от вашего реального IP."
+                )),
             reply_markup=keyboards.create_howto_vless_keyboard(),
             disable_web_page_preview=True
         )
@@ -1166,16 +1302,18 @@ def get_user_router() -> Router:
         await callback.answer()
         try:
             await callback.message.edit_text(
-                "<b>Подключение на iOS (iPhone/iPad)</b>\n\n"
-                "1. <b>Установите приложение V2RayTun:</b> Загрузите и установите приложение V2RayTun из App Store.\n"
-                "2. <b>Скопируйте свой ключ (vless://):</b> Перейдите в раздел «Моя подписка» в нашем боте и скопируйте свой ключ.\n"
-                "3. <b>Импортируйте конфигурацию:</b>\n"
-                "   • Откройте V2RayTun.\n"
-                "   • Нажмите на значок +.\n"
-                "   • Выберите «Импортировать конфигурацию из буфера обмена» (или аналогичный пункт).\n"
-                "4. <b>Выберите сервер:</b> Выберите появившийся сервер в списке.\n"
-                "5. <b>Подключитесь к VPN:</b> Включите главный переключатель в V2RayTun. Возможно, потребуется разрешить создание VPN-подключения.\n"
-                "6. <b>Проверьте подключение:</b> После подключения проверьте свой IP-адрес, например, на https://whatismyipaddress.com/. Он должен отличаться от вашего реального IP.",
+                (get_setting("howto_ios_text") or (
+                    "<b>Подключение на iOS (iPhone/iPad)</b>\n\n"
+                    "1. <b>Установите приложение V2RayTun:</b> Загрузите и установите приложение V2RayTun из App Store.\n"
+                    "2. <b>Скопируйте свой ключ (vless://):</b> Перейдите в раздел «Моя подписка» в нашем боте и скопируйте свой ключ.\n"
+                    "3. <b>Импортируйте конфигурацию:</b>\n"
+                    "   • Откройте V2RayTun.\n"
+                    "   • Нажмите на значок +.\n"
+                    "   • Выберите «Импортировать конфигурацию из буфера обмена» (или аналогичный пункт).\n"
+                    "4. <b>Выберите сервер:</b> Выберите появившийся сервер в списке.\n"
+                    "5. <b>Подключитесь к VPN:</b> Включите главный переключатель в V2RayTun. Возможно, потребуется разрешить создание VPN-подключения.\n"
+                    "6. <b>Проверьте подключение:</b> После подключения проверьте свой IP-адрес, например, на https://whatismyipaddress.com/. Он должен отличаться от вашего реального IP."
+                )),
             reply_markup=keyboards.create_howto_vless_keyboard(),
             disable_web_page_preview=True
         )
@@ -1188,20 +1326,22 @@ def get_user_router() -> Router:
         await callback.answer()
         try:
             await callback.message.edit_text(
-                "<b>Подключение на Windows</b>\n\n"
-                "1. <b>Установите приложение Nekoray:</b> Загрузите Nekoray с https://github.com/MatsuriDayo/Nekoray/releases. Выберите подходящую версию (например, Nekoray-x64.exe).\n"
-                "2. <b>Распакуйте архив:</b> Распакуйте скачанный архив в удобное место.\n"
-                "3. <b>Запустите Nekoray.exe:</b> Откройте исполняемый файл.\n"
-                "4. <b>Скопируйте свой ключ (vless://)</b> Перейдите в раздел «Моя подписка» в нашем боте и скопируйте свой ключ.\n"
-                "5. <b>Импортируйте конфигурацию:</b>\n"
-                "   • В Nekoray нажмите «Сервер» (Server).\n"
-                "   • Выберите «Импортировать из буфера обмена».\n"
-                "   • Nekoray автоматически импортирует конфигурацию.\n"
-                "6. <b>Обновите серверы (если нужно):</b> Если серверы не появились, нажмите «Серверы» → «Обновить все серверы».\n"
-                "7. Сверху включите пункт 'Режим TUN' ('Tun Mode')\n"
-                "8. <b>Выберите сервер:</b> В главном окне выберите появившийся сервер.\n"
-                "9. <b>Подключитесь к VPN:</b> Нажмите «Подключить» (Connect).\n"
-                "10. <b>Проверьте подключение:</b> Откройте браузер и проверьте IP на https://whatismyipaddress.com/. Он должен отличаться от вашего реального IP.",
+                (get_setting("howto_windows_text") or (
+                    "<b>Подключение на Windows</b>\n\n"
+                    "1. <b>Установите приложение Nekoray:</b> Загрузите Nekoray с https://github.com/MatsuriDayo/Nekoray/releases. Выберите подходящую версию (например, Nekoray-x64.exe).\n"
+                    "2. <b>Распакуйте архив:</b> Распакуйте скачанный архив в удобное место.\n"
+                    "3. <b>Запустите Nekoray.exe:</b> Откройте исполняемый файл.\n"
+                    "4. <b>Скопируйте свой ключ (vless://)</b> Перейдите в раздел «Моя подписка» в нашем боте и скопируйте свой ключ.\n"
+                    "5. <b>Импортируйте конфигурацию:</b>\n"
+                    "   • В Nekoray нажмите «Сервер» (Server).\n"
+                    "   • Выберите «Импортировать из буфера обмена».\n"
+                    "   • Nekoray автоматически импортирует конфигурацию.\n"
+                    "6. <b>Обновите серверы (если нужно):</b> Если серверы не появились, нажмите «Серверы» → «Обновить все серверы».\n"
+                    "7. Сверху включите пункт 'Режим TUN' ('Tun Mode')\n"
+                    "8. <b>Выберите сервер:</b> В главном окне выберите появившийся сервер.\n"
+                    "9. <b>Подключитесь к VPN:</b> Нажмите «Подключить» (Connect).\n"
+                    "10. <b>Проверьте подключение:</b> Откройте браузер и проверьте IP на https://whatismyipaddress.com/. Он должен отличаться от вашего реального IP."
+                )),
             reply_markup=keyboards.create_howto_vless_keyboard(),
             disable_web_page_preview=True
         )
@@ -1214,19 +1354,21 @@ def get_user_router() -> Router:
         await callback.answer()
         try:
             await callback.message.edit_text(
-                "<b>Подключение на Linux</b>\n\n"
-                "1. <b>Скачайте и распакуйте Nekoray:</b> Перейдите на https://github.com/MatsuriDayo/Nekoray/releases и скачайте архив для Linux. Распакуйте его в удобную папку.\n"
-                "2. <b>Запустите Nekoray:</b> Откройте терминал, перейдите в папку с Nekoray и выполните <code>./nekoray</code> (или используйте графический запуск, если доступен).\n"
-                "3. <b>Скопируйте свой ключ (vless://)</b> Перейдите в раздел «Моя подписка» в нашем боте и скопируйте свой ключ.\n"
-                "4. <b>Импортируйте конфигурацию:</b>\n"
-                "   • В Nekoray нажмите «Сервер» (Server).\n"
-                "   • Выберите «Импортировать из буфера обмена».\n"
-                "   • Nekoray автоматически импортирует конфигурацию.\n"
-                "5. <b>Обновите серверы (если нужно):</b> Если серверы не появились, нажмите «Серверы» → «Обновить все серверы».\n"
-                "6. Сверху включите пункт 'Режим TUN' ('Tun Mode')\n"
-                "7. <b>Выберите сервер:</b> В главном окне выберите появившийся сервер.\n"
-                "8. <b>Подключитесь к VPN:</b> Нажмите «Подключить» (Connect).\n"
-                "9. <b>Проверьте подключение:</b> Откройте браузер и проверьте IP на https://whatismyipaddress.com/. Он должен отличаться от вашего реального IP.",
+                (get_setting("howto_linux_text") or (
+                    "<b>Подключение на Linux</b>\n\n"
+                    "1. <b>Скачайте и распакуйте Nekoray:</b> Перейдите на https://github.com/MatsuriDayo/Nekoray/releases и скачайте архив для Linux. Распакуйте его в удобную папку.\n"
+                    "2. <b>Запустите Nekoray:</b> Откройте терминал, перейдите в папку с Nekoray и выполните <code>./nekoray</code> (или используйте графический запуск, если доступен).\n"
+                    "3. <b>Скопируйте свой ключ (vless://)</b> Перейдите в раздел «Моя подписка» в нашем боте и скопируйте свой ключ.\n"
+                    "4. <b>Импортируйте конфигурацию:</b>\n"
+                    "   • В Nekoray нажмите «Сервер» (Server).\n"
+                    "   • Выберите «Импортировать из буфера обмена».\n"
+                    "   • Nekoray автоматически импортирует конфигурацию.\n"
+                    "5. <b>Обновите серверы (если нужно):</b> Если серверы не появились, нажмите «Серверы» → «Обновить все серверы».\n"
+                    "6. Сверху включите пункт 'Режим TUN' ('Tun Mode')\n"
+                    "7. <b>Выберите сервер:</b> В главном окне выберите появившийся сервер.\n"
+                    "8. <b>Подключитесь к VPN:</b> Нажмите «Подключить» (Connect).\n"
+                    "9. <b>Проверьте подключение:</b> Откройте браузер и проверьте IP на https://whatismyipaddress.com/. Он должен отличаться от вашего реального IP."
+                )),
             reply_markup=keyboards.create_howto_vless_keyboard(),
             disable_web_page_preview=True
         )
@@ -1490,7 +1632,9 @@ def get_user_router() -> Router:
                         "description": f"Подписка на {months} мес.",
                         "quantity": "1.00",
                         "amount": {"value": price_str_for_api, "currency": "RUB"},
-                        "vat_code": "1"
+                        "vat_code": "1",
+                        "payment_subject": "service",
+                        "payment_mode": "full_payment"
                     }]
                 }
             payment_payload = {
@@ -1519,6 +1663,133 @@ def get_user_router() -> Router:
         except Exception as e:
             logger.error(f"Failed to create YooKassa payment: {e}", exc_info=True)
             await callback.message.answer("Не удалось создать ссылку на оплату.")
+            await state.clear()
+
+    @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_yoomoney")
+    async def create_yoomoney_payment_handler(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer("Готовлю ссылку ЮMoney…")
+        data = await state.get_data()
+        user_data = get_user(callback.from_user.id)
+        plan = get_plan_by_id(data.get('plan_id'))
+        if not plan:
+            await callback.message.edit_text("❌ Произошла ошибка при выборе тарифа.")
+            await state.clear()
+            return
+        # Цена со скидкой по рефералке (как у других методов)
+        base_price = Decimal(str(plan['price']))
+        price_rub = base_price
+        if user_data and user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
+            try:
+                discount_percentage = Decimal(get_setting("referral_discount") or "0")
+            except Exception:
+                discount_percentage = Decimal("0")
+            if discount_percentage > 0:
+                price_rub = base_price - (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
+
+        ym_wallet = (get_setting("yoomoney_wallet") or "").strip()
+        if not ym_wallet:
+            await callback.message.edit_text("❌ Оплата через ЮMoney временно недоступна.")
+            await state.clear()
+            return
+
+        months = int(plan['months'])
+        user_id = callback.from_user.id
+        payment_id = str(uuid.uuid4())
+        metadata = {
+            "payment_id": payment_id,
+            "user_id": user_id,
+            "months": months,
+            "price": float(price_rub),
+            "action": data.get('action'),
+            "key_id": data.get('key_id'),
+            "host_name": data.get('host_name'),
+            "plan_id": data.get('plan_id'),
+            "customer_email": data.get('customer_email'),
+            "payment_method": "YooMoney",
+        }
+        # Сохраняем pending транзакцию в БД
+        try:
+            create_pending_transaction(payment_id, user_id, float(price_rub), metadata)
+        except Exception as e:
+            logger.warning(f"YooMoney: failed to create pending transaction: {e}")
+
+        # Формируем ссылку QuickPay
+        try:
+            success_url = f"https://t.me/{TELEGRAM_BOT_USERNAME}" if TELEGRAM_BOT_USERNAME else None
+        except Exception:
+            success_url = None
+        targets = f"Оплата {months} мес."
+        pay_url = _build_yoomoney_quickpay_url(
+            wallet=ym_wallet,
+            amount=float(price_rub),
+            label=payment_id,
+            success_url=success_url,
+            targets=targets,
+        )
+
+        await state.clear()
+        try:
+            await callback.message.edit_text(
+                "Нажмите на кнопку ниже для оплаты. После оплаты нажмите 'Проверить оплату':",
+                reply_markup=keyboards.create_payment_with_check_keyboard(pay_url, f"check_yoomoney_{payment_id}")
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                "Нажмите на кнопку ниже для оплаты. После оплаты нажмите 'Проверить оплату':",
+                reply_markup=keyboards.create_payment_with_check_keyboard(pay_url, f"check_yoomoney_{payment_id}")
+            )
+
+    @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_stars")
+    async def create_stars_invoice_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+        await callback.answer("Готовлю счёт в Stars…")
+        data = await state.get_data()
+        user_data = get_user(callback.from_user.id)
+        plan = get_plan_by_id(data.get('plan_id'))
+        if not plan:
+            await callback.message.edit_text("❌ Произошла ошибка при выборе тарифа.")
+            await state.clear()
+            return
+        base_price = Decimal(str(plan['price']))
+        price_rub = base_price
+        if user_data and user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
+            try:
+                discount_percentage = Decimal(get_setting("referral_discount") or "0")
+            except Exception:
+                discount_percentage = Decimal("0")
+            if discount_percentage > 0:
+                price_rub = base_price - (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
+        months = int(plan['months'])
+        price_decimal = Decimal(str(price_rub)).quantize(Decimal("0.01"))
+        stars_count = _calc_stars_amount(price_decimal)
+
+        # Payload с полной метаинформацией для process_successful_payment
+        payload = json.dumps({
+            "user_id": callback.from_user.id,
+            "months": months,
+            "price": float(price_decimal),
+            "action": data.get('action'),
+            "key_id": data.get('key_id'),
+            "host_name": data.get('host_name'),
+            "plan_id": data.get('plan_id'),
+            "customer_email": data.get('customer_email'),
+            "payment_method": "Stars"
+        }, ensure_ascii=False)
+
+        title = (get_setting("stars_title") or "Покупка VPN")
+        description = (get_setting("stars_description") or f"Оплата {months} мес.")
+        try:
+            await bot.send_invoice(
+                chat_id=callback.message.chat.id,
+                title=title,
+                description=description,
+                payload=payload,
+                currency="XTR",
+                prices=[types.LabeledPrice(label=f"{months} мес.", amount=stars_count)],
+            )
+            await state.clear()
+        except Exception as e:
+            logger.error(f"Failed to send Stars invoice: {e}")
+            await callback.message.edit_text("❌ Не удалось создать счёт Stars. Попробуйте другой способ оплаты.")
             await state.clear()
 
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_cryptobot")
@@ -1687,7 +1958,31 @@ def get_user_router() -> Router:
         await state.clear()
         await process_successful_payment(bot, metadata)
 
-    
+    # Telegram Payments: подтверждаем pre_checkout
+    @user_router.pre_checkout_query()
+    async def pre_checkout_handler(pre_checkout_query: types.PreCheckoutQuery, bot: Bot):
+        try:
+            await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+        except Exception as e:
+            logger.warning(f"pre_checkout_handler failed: {e}")
+
+    # Сообщение об успешной оплате (в т.ч. Stars)
+    @user_router.message(F.successful_payment)
+    async def successful_payment_handler(message: types.Message, bot: Bot):
+        try:
+            sp = message.successful_payment
+            payload = sp.invoice_payload or ""
+            metadata = json.loads(payload) if payload else {}
+        except Exception as e:
+            logger.error(f"Failed to parse successful_payment payload: {e}")
+            metadata = {}
+        if not metadata:
+            try:
+                await message.answer("✅ Оплата получена, но нет данных заказа. Обратитесь в поддержку, если ключ не выдан.")
+            except Exception:
+                pass
+            return
+        await process_successful_payment(bot, metadata)
 
     return user_router
 
@@ -1927,6 +2222,77 @@ async def _start_ton_connect_process(user_id: int, transaction_payload: Dict) ->
         logger.error(f"TON deep link generation failed: {e}")
         # Фолбэк: без параметров
         return "ton://transfer"
+
+def _build_yoomoney_quickpay_url(
+    wallet: str,
+    amount: float,
+    label: str,
+    success_url: Optional[str] = None,
+    targets: Optional[str] = None,
+) -> str:
+    try:
+        params = {
+            "receiver": wallet,
+            "quickpay-form": "shop",
+            "sum": f"{float(amount):.2f}",
+            "label": label,
+        }
+        if success_url:
+            params["successURL"] = success_url
+        if targets:
+            params["targets"] = targets
+        base = "https://yoomoney.ru/quickpay/confirm.xml"
+        return f"{base}?{urlencode(params)}"
+    except Exception:
+        return "https://yoomoney.ru/"
+
+async def _yoomoney_find_payment(label: str) -> Optional[dict]:
+    token = (get_setting("yoomoney_api_token") or "").strip()
+    if not token:
+        logger.warning("YooMoney: API токен не задан в настройках.")
+        return None
+    url = "https://yoomoney.ru/api/operation-history"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    data = {
+        "label": label,
+        "records": "5",
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data=data, headers=headers, timeout=15) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    logger.warning(f"YooMoney: operation-history HTTP {resp.status}: {text}")
+                    return None
+                try:
+                    payload = await resp.json()
+                except Exception:
+                    try:
+                        payload = json.loads(text)
+                    except Exception:
+                        logger.warning("YooMoney: не удалось распарсить JSON operation-history")
+                        return None
+                ops = payload.get("operations") or []
+                for op in ops:
+                    if str(op.get("label")) == str(label) and str(op.get("direction")) == "in":
+                        status = str(op.get("status") or "").lower()
+                        if status == "success":
+                            try:
+                                amount = float(op.get("amount"))
+                            except Exception:
+                                amount = None
+                            return {
+                                "operation_id": op.get("operation_id"),
+                                "amount": amount,
+                                "datetime": op.get("datetime"),
+                            }
+                return None
+    except Exception as e:
+        logger.error(f"YooMoney: ошибка запроса operation-history: {e}", exc_info=True)
+        return None
 
 async def notify_admin_of_purchase(bot: Bot, metadata: dict):
     try:

@@ -46,7 +46,18 @@ _support_bot_controller = SupportBotController()
 
 ALL_SETTINGS_KEYS = [
     "panel_login", "panel_password", "about_text", "terms_url", "privacy_url",
-    "support_user", "support_text", "channel_url", "telegram_bot_token",
+    "support_user", "support_text",
+    # Editable content from admin UI
+    "main_menu_text", "howto_android_text", "howto_ios_text", "howto_windows_text", "howto_linux_text",
+    # Button texts
+    "btn_try", "btn_profile", "btn_my_keys", "btn_buy_key", "btn_top_up", "btn_referral", "btn_support", "btn_about", "btn_howto", "btn_admin", "btn_back_to_menu",
+    "btn_channel", "btn_terms", "btn_privacy", "btn_howto_android", "btn_howto_ios", "btn_howto_windows", "btn_howto_linux",
+    # Extra button labels
+    "btn_back", "btn_back_to_plans", "btn_back_to_key", "btn_back_to_keys",
+    "btn_extend_key", "btn_show_qr", "btn_instruction", "btn_switch_server",
+    "btn_skip_email", "btn_go_to_payment", "btn_check_payment", "btn_pay_with_balance",
+    "btn_support_open", "btn_support_new_ticket", "btn_support_my_tickets", "btn_support_external",
+    "channel_url", "telegram_bot_token",
     "telegram_bot_username", "admin_telegram_id", "yookassa_shop_id",
     "yookassa_secret_key", "sbp_enabled", "receipt_email", "cryptobot_token",
     "heleket_merchant_id", "heleket_api_key", "domain", "referral_percentage",
@@ -60,7 +71,11 @@ ALL_SETTINGS_KEYS = [
     # UI
     "panel_brand_title",
     # Backups
-    "backup_interval_days"
+    "backup_interval_days",
+    # Telegram Stars
+    "stars_enabled", "stars_per_rub", "stars_title", "stars_description",
+    # YooMoney (separate)
+    "yoomoney_enabled", "yoomoney_wallet", "yoomoney_api_token",
 ]
 
 def create_webhook_app(bot_controller_instance):
@@ -1032,7 +1047,7 @@ def create_webhook_app(bot_controller_instance):
                 update_setting('panel_password', request.form.get('panel_password'))
 
             # Обработка чекбоксов, где в форме идёт hidden=false + checkbox=true
-            checkbox_keys = ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus']
+            checkbox_keys = ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled']
             for checkbox_key in checkbox_keys:
                 values = request.form.getlist(checkbox_key)
                 value = values[-1] if values else 'false'

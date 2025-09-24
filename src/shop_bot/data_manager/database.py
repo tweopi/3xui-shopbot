@@ -140,6 +140,50 @@ def initialize_db():
                 "privacy_url": None,
                 "support_user": None,
                 "support_text": None,
+                # Editable content
+                "main_menu_text": None,
+                "howto_android_text": None,
+                "howto_ios_text": None,
+                "howto_windows_text": None,
+                "howto_linux_text": None,
+                # Button texts (customizable)
+                "btn_try": "🎁 Попробовать бесплатно",
+                "btn_profile": "👤 Мой профиль",
+                "btn_my_keys": "🔑 Мои ключи ({count})",
+                "btn_buy_key": "💳 Купить ключ",
+                "btn_top_up": "➕ Пополнить баланс",
+                "btn_referral": "🤝 Реферальная программа",
+                "btn_support": "🆘 Поддержка",
+                "btn_about": "ℹ️ О проекте",
+                "btn_howto": "❓ Как использовать",
+                "btn_admin": "⚙️ Админка",
+                "btn_back_to_menu": "⬅️ Назад в меню",
+                "btn_back": "⬅️ Назад",
+                "btn_back_to_plans": "⬅️ Назад к тарифам",
+                "btn_back_to_key": "⬅️ Назад к ключу",
+                "btn_back_to_keys": "⬅️ Назад к списку ключей",
+                "btn_extend_key": "➕ Продлить этот ключ",
+                "btn_show_qr": "📱 Показать QR-код",
+                "btn_instruction": "📖 Инструкция",
+                "btn_switch_server": "🌍 Сменить сервер",
+                "btn_skip_email": "➡️ Продолжить без почты",
+                "btn_go_to_payment": "Перейти к оплате",
+                "btn_check_payment": "✅ Проверить оплату",
+                "btn_pay_with_balance": "💼 Оплатить с баланса",
+                # About/links
+                "btn_channel": "📰 Наш канал",
+                "btn_terms": "📄 Условия использования",
+                "btn_privacy": "🔒 Политика конфиденциальности",
+                # Howto platform buttons
+                "btn_howto_android": "📱 Android",
+                "btn_howto_ios": "📱 iOS",
+                "btn_howto_windows": "💻 Windows",
+                "btn_howto_linux": "🐧 Linux",
+                # Support menu
+                "btn_support_open": "🆘 Открыть поддержку",
+                "btn_support_new_ticket": "✍️ Новое обращение",
+                "btn_support_my_tickets": "📨 Мои обращения",
+                "btn_support_external": "🆘 Внешняя поддержка",
                 "channel_url": None,
                 "force_subscription": "true",
                 "receipt_email": "example@example.com",
@@ -170,6 +214,17 @@ def initialize_db():
                 "referral_on_start_referrer_amount": "20",
                 # Backups
                 "backup_interval_days": "1",
+                # Telegram Stars payments
+                "stars_enabled": "false",
+                # Сколько звёзд списывать за 1 RUB (напр., 1.5 звезды за 1 рубль)
+                "stars_per_rub": "1",
+                # Заголовок/описание инвойсов Stars
+                "stars_title": "VPN подписка",
+                "stars_description": "Оплата в Telegram Stars",
+                # YooMoney separate payments
+                "yoomoney_enabled": "false",
+                "yoomoney_wallet": None,
+                "yoomoney_api_token": None,
             }
             run_migration()
             for key, value in default_settings.items():
@@ -671,6 +726,52 @@ def get_latest_speedtest(host_name: str) -> dict | None:
             return dict(row) if row else None
     except sqlite3.Error as e:
         logging.error(f"Не удалось получить последний speedtest для хоста '{host_name}': {e}")
+        return None
+
+def find_and_complete_pending_transaction(
+    payment_id: str,
+    amount_rub: float | None,
+    payment_method: str,
+    currency_name: str | None = None,
+    amount_currency: float | None = None,
+) -> dict | None:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT * FROM transactions WHERE payment_id = ? AND status = 'pending'", (payment_id,))
+            transaction = cursor.fetchone()
+            if not transaction:
+                logger.warning(f"Pending transaction not found for payment_id={payment_id}")
+                return None
+
+            cursor.execute(
+                """
+                UPDATE transactions
+                SET status = 'paid',
+                    amount_rub = COALESCE(?, amount_rub),
+                    amount_currency = COALESCE(?, amount_currency),
+                    currency_name = COALESCE(?, currency_name),
+                    payment_method = COALESCE(?, payment_method)
+                WHERE payment_id = ?
+                """,
+                (amount_rub, amount_currency, currency_name, payment_method, payment_id)
+            )
+            conn.commit()
+
+            try:
+                raw_md = None
+                try:
+                    raw_md = transaction['metadata']
+                except Exception:
+                    raw_md = None
+                md = json.loads(raw_md) if raw_md else {}
+            except Exception:
+                md = {}
+            return md
+    except sqlite3.Error as e:
+        logging.error(f"Failed to complete pending transaction {payment_id}: {e}")
         return None
 
 def insert_host_speedtest(

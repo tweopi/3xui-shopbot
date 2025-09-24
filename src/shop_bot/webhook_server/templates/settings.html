@@ -608,21 +608,6 @@
 							</div>
 						</div>
 
-						<div class="mb-3">
-							<label class="form-label" for="domain">Ваш домен (например, my-shop.com)</label>
-							<input class="form-control" type="text" id="domain" name="domain" value="{{ settings.domain or '' }}" />
-						</div>
-
-						<h3 class="h4">Настройка TonConnect</h3>
-						<div class="mb-3">
-							<label class="form-label" for="ton_wallet_address">Ton Wallet</label>
-							<input class="form-control" type="text" id="ton_wallet_address" name="ton_wallet_address" value="{{ settings.ton_wallet_address or '' }}" />
-						</div>
-						<div class="mb-3 password-wrapper">
-							<label class="form-label" for="tonapi_key">TonAPI Key</label>
-							<div class="d-flex gap-2">
-								<input class="form-control" type="password" id="tonapi_key" name="tonapi_key" value="{{ settings.tonapi_key or '' }}" />
-								<button type="button" class="btn btn-outline-secondary toggle-password">👁️</button>
 							</div>
 						</div>
 					</div>
@@ -633,7 +618,6 @@
 				<div class="card">
 					<div class="card-header"><h2 class="card-title">Настройки Контента</h2></div>
 					<div class="card-body">
-						<div class="mb-3">
 							<label class="form-label" for="about_text">Текст "О проекте"</label>
 							<textarea class="form-control" id="about_text" name="about_text" rows="3">{{ settings.about_text or "" }}</textarea>
 						</div>
@@ -641,6 +625,116 @@
 							<label class="form-label" for="support_text">Текст в разделе "Поддержка"</label>
 							<textarea class="form-control" id="support_text" name="support_text" rows="3">{{ settings.support_text or "" }}</textarea>
 						</div>
+                        <div class="mb-3">
+                            <label class="form-label" for="main_menu_text">Текст главного меню</label>
+                            <textarea class="form-control" id="main_menu_text" name="main_menu_text" rows="3" placeholder="🏠 <b>Главное меню</b>\n\nВыберите действие:">{{ settings.main_menu_text or "" }}</textarea>
+                            <div class="form-hint">Поддерживаются базовые HTML-теги (например, &lt;b&gt;...&lt;/b&gt;). Телеграм может требовать указания parse_mode в коде бота для отображения форматирования.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label" for="howto_android_text">Инструкция: Android</label>
+                            <textarea class="form-control" id="howto_android_text" name="howto_android_text" rows="8">{{ settings.howto_android_text or "" }}</textarea>
+                            <div class="form-hint">Текст, который видит пользователь при выборе инструкции для Android.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label" for="howto_ios_text">Инструкция: iOS</label>
+                            <textarea class="form-control" id="howto_ios_text" name="howto_ios_text" rows="8">{{ settings.howto_ios_text or "" }}</textarea>
+                            <div class="form-hint">Текст, который видит пользователь при выборе инструкции для iOS.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label" for="howto_windows_text">Инструкция: Windows</label>
+                            <textarea class="form-control" id="howto_windows_text" name="howto_windows_text" rows="8">{{ settings.howto_windows_text or "" }}</textarea>
+                            <div class="form-hint">Текст, который видит пользователь при выборе инструкции для Windows.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label" for="howto_linux_text">Инструкция: Linux</label>
+                            <textarea class="form-control" id="howto_linux_text" name="howto_linux_text" rows="8">{{ settings.howto_linux_text or "" }}</textarea>
+                            <div class="form-hint">Текст, который видит пользователь при выборе инструкции для Linux.</div>
+                        </div>
+
+                        <hr />
+                        <h3 class="h4">Тексты кнопок</h3>
+                        <div class="mb-2 text-secondary">Здесь можно переименовать подписи основных кнопок в боте. Поддерживаются эмодзи. Для кнопки "Мои ключи" доступен плейсхолдер {count} — он будет автоматически заменён на число ключей.</div>
+
+                        <div class="row g-3">
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_try">Кнопка: Попробовать бесплатно</label>
+                            <input class="form-control" type="text" id="btn_try" name="btn_try" value="{{ settings.btn_try or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_profile">Кнопка: Мой профиль</label>
+                            <input class="form-control" type="text" id="btn_profile" name="btn_profile" value="{{ settings.btn_profile or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_my_keys">Кнопка: Мои ключи</label>
+                            <input class="form-control" type="text" id="btn_my_keys" name="btn_my_keys" value="{{ settings.btn_my_keys or '' }}" />
+                            <div class="form-hint">Можно использовать {count} — будет заменено на количество ключей.</div>
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_buy_key">Кнопка: Купить ключ</label>
+                            <input class="form-control" type="text" id="btn_buy_key" name="btn_buy_key" value="{{ settings.btn_buy_key or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_top_up">Кнопка: Пополнить баланс</label>
+                            <input class="form-control" type="text" id="btn_top_up" name="btn_top_up" value="{{ settings.btn_top_up or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_referral">Кнопка: Реферальная программа</label>
+                            <input class="form-control" type="text" id="btn_referral" name="btn_referral" value="{{ settings.btn_referral or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_support">Кнопка: Поддержка</label>
+                            <input class="form-control" type="text" id="btn_support" name="btn_support" value="{{ settings.btn_support or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_about">Кнопка: О проекте</label>
+                            <input class="form-control" type="text" id="btn_about" name="btn_about" value="{{ settings.btn_about or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_howto">Кнопка: Как использовать</label>
+                            <input class="form-control" type="text" id="btn_howto" name="btn_howto" value="{{ settings.btn_howto or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_admin">Кнопка: Админка</label>
+                            <input class="form-control" type="text" id="btn_admin" name="btn_admin" value="{{ settings.btn_admin or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_back_to_menu">Кнопка: Назад в меню</label>
+                            <input class="form-control" type="text" id="btn_back_to_menu" name="btn_back_to_menu" value="{{ settings.btn_back_to_menu or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_channel">Кнопка: Наш канал</label>
+                            <input class="form-control" type="text" id="btn_channel" name="btn_channel" value="{{ settings.btn_channel or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_terms">Кнопка: Условия использования</label>
+                            <input class="form-control" type="text" id="btn_terms" name="btn_terms" value="{{ settings.btn_terms or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_privacy">Кнопка: Политика конфиденциальности</label>
+                            <input class="form-control" type="text" id="btn_privacy" name="btn_privacy" value="{{ settings.btn_privacy or '' }}" />
+                          </div>
+
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_howto_android">Кнопка: Android</label>
+                            <input class="form-control" type="text" id="btn_howto_android" name="btn_howto_android" value="{{ settings.btn_howto_android or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_howto_ios">Кнопка: iOS</label>
+                            <input class="form-control" type="text" id="btn_howto_ios" name="btn_howto_ios" value="{{ settings.btn_howto_ios or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_howto_windows">Кнопка: Windows</label>
+                            <input class="form-control" type="text" id="btn_howto_windows" name="btn_howto_windows" value="{{ settings.btn_howto_windows or '' }}" />
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label" for="btn_howto_linux">Кнопка: Linux</label>
+                            <input class="form-control" type="text" id="btn_howto_linux" name="btn_howto_linux" value="{{ settings.btn_howto_linux or '' }}" />
+                          </div>
+                        </div>
 						<div class="mb-3">
 							<label class="form-label" for="terms_url">URL "Условия использования"</label>
 							<input class="form-control" type="url" id="terms_url" name="terms_url" value="{{ settings.terms_url or '' }}" />

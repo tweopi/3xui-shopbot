@@ -104,6 +104,14 @@ class BotController:
             tonapi_key = database.get_setting("tonapi_key")
             tonconnect_enabled = bool(ton_wallet_address and tonapi_key)
 
+            # Telegram Stars (оплата в звёздах) — включается флагом в настройках
+            stars_flag = database.get_setting("stars_enabled")
+            stars_enabled = str(stars_flag).lower() in ("true", "1", "yes", "on")
+            # YooMoney (отдельная платёжка)
+            ym_flag = database.get_setting("yoomoney_enabled")
+            ym_wallet = database.get_setting("yoomoney_wallet")
+            yoomoney_enabled = (str(ym_flag).lower() in ("true", "1", "yes", "on")) and bool(ym_wallet)
+
             if yookassa_enabled:
                 Configuration.account_id = yookassa_shop_id
                 Configuration.secret_key = yookassa_secret_key
@@ -112,7 +120,9 @@ class BotController:
                 "yookassa": yookassa_enabled,
                 "heleket": heleket_enabled,
                 "cryptobot": cryptobot_enabled,
-                "tonconnect": tonconnect_enabled
+                "tonconnect": tonconnect_enabled,
+                "stars": stars_enabled,
+                "yoomoney": yoomoney_enabled,
             }
             handlers.TELEGRAM_BOT_USERNAME = bot_username
             handlers.ADMIN_ID = admin_id
