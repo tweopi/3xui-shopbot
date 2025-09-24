@@ -10,10 +10,7 @@ try:
 except Exception:
     colorama_available = False
 
-from shop_bot.webhook_server.app import create_webhook_app
-from shop_bot.data_manager.scheduler import periodic_subscription_check
 from shop_bot.data_manager import database
-from shop_bot.bot_controller import BotController
 
 def main():
     if colorama_available:
@@ -100,8 +97,14 @@ def main():
     aio_event_logger.addFilter(RussianizeAiogramFilter())
     logger = logging.getLogger(__name__)
 
+    # ВАЖНО: сначала инициализируем базу данных, чтобы таблицы (включая bot_settings) были созданы
     database.initialize_db()
     logger.info("Проверка инициализации базы данных завершена.")
+
+    # Импортируем модули, которые косвенно тянут handlers.py, только после инициализации БД
+    from shop_bot.bot_controller import BotController
+    from shop_bot.webhook_server.app import create_webhook_app
+    from shop_bot.data_manager.scheduler import periodic_subscription_check
 
     bot_controller = BotController()
     flask_app = create_webhook_app(bot_controller)
