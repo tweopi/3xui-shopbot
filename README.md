@@ -292,5 +292,6 @@ docker-compose down && docker-compose up
 ## 💎 Поддержать разработку
 
 **СБП/Карта РФ:** https://yookassa.ru/my/i/aJiSmSUeUie5/l
+**Т-Банк:** https://tbank.ru/cf/1JpNWKAFzqR
 
 ## Я ценю любой вклад в развитие проекта ❤️
