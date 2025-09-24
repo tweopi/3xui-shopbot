@@ -559,12 +559,20 @@ def get_user_router() -> Router:
             await state.clear()
             return
         stars_count = _calc_stars_amount(amount_rub.quantize(Decimal("0.01")))
-        payload = json.dumps({
+        # Для Telegram Stars payload должен быть коротким (до 128 байт). Используем UUID
+        # и сохраняем полные метаданные во временную pending‑транзакцию.
+        payment_id = str(uuid.uuid4())
+        metadata = {
             "user_id": callback.from_user.id,
             "price": float(amount_rub),
             "action": "top_up",
-            "payment_method": "Stars"
-        }, ensure_ascii=False)
+            "payment_method": "Stars",
+        }
+        try:
+            create_pending_transaction(payment_id, callback.from_user.id, float(amount_rub), metadata)
+        except Exception as e:
+            logger.warning(f"Stars topup: failed to create pending transaction: {e}")
+        payload = payment_id
         title = (get_setting("stars_title") or "Пополнение баланса")
         description = (get_setting("stars_description") or f"Пополнение на {amount_rub} RUB")
         try:
@@ -1770,9 +1778,9 @@ def get_user_router() -> Router:
         months = int(plan['months'])
         price_decimal = Decimal(str(price_rub)).quantize(Decimal("0.01"))
         stars_count = _calc_stars_amount(price_decimal)
-
-        # Payload с полной метаинформацией для process_successful_payment
-        payload = json.dumps({
+        # Для Stars ограничим payload до UUID, метаданные сохраним в pending‑транзакцию
+        payment_id = str(uuid.uuid4())
+        metadata = {
             "user_id": callback.from_user.id,
             "months": months,
             "price": float(price_decimal),
@@ -1781,8 +1789,13 @@ def get_user_router() -> Router:
             "host_name": data.get('host_name'),
             "plan_id": data.get('plan_id'),
             "customer_email": data.get('customer_email'),
-            "payment_method": "Stars"
-        }, ensure_ascii=False)
+            "payment_method": "Stars",
+        }
+        try:
+            create_pending_transaction(payment_id, callback.from_user.id, float(price_decimal), metadata)
+        except Exception as e:
+            logger.warning(f"Stars purchase: failed to create pending transaction: {e}")
+        payload = payment_id
 
         title = (get_setting("stars_title") or "Покупка VPN")
         description = (get_setting("stars_description") or f"Оплата {months} мес.")
@@ -1981,7 +1994,32 @@ def get_user_router() -> Router:
         try:
             sp = message.successful_payment
             payload = sp.invoice_payload or ""
-            metadata = json.loads(payload) if payload else {}
+            metadata = {}
+            # 1) Пытаемся трактовать payload как JSON (на случай старых инвойсов)
+            if payload:
+                try:
+                    parsed = json.loads(payload)
+                    if isinstance(parsed, dict):
+                        metadata = parsed
+                except Exception:
+                    metadata = {}
+            # 2) Если JSON не получился — считаем, что payload это payment_id для pending‑транзакции
+            if not metadata and payload:
+                try:
+                    currency = getattr(sp, 'currency', None)
+                    total_amount = getattr(sp, 'total_amount', None)
+                    payment_method = "Stars" if str(currency).upper() == "XTR" else "Card"
+                    md = find_and_complete_pending_transaction(
+                        payment_id=payload,
+                        amount_rub=None,  # оставляем исходную сумму из pending
+                        payment_method=payment_method,
+                        currency_name=currency,
+                        amount_currency=(float(total_amount) if total_amount is not None else None),
+                    )
+                    if md:
+                        metadata = md
+                except Exception as e:
+                    logger.error(f"Failed to resolve pending transaction by payload '{payload}': {e}")
         except Exception as e:
             logger.error(f"Failed to parse successful_payment payload: {e}")
             metadata = {}
