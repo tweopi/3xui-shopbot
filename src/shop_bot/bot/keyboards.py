@@ -503,20 +503,50 @@ def create_admin_hosts_pick_keyboard(hosts: list[dict], action: str = "gift") ->
     builder.adjust(*(rows + tail))
     return builder.as_markup()
 
-def create_admin_keys_for_host_keyboard(host_name: str, keys: list[dict]) -> InlineKeyboardMarkup:
+def create_admin_keys_for_host_keyboard(
+    host_name: str,
+    keys: list[dict],
+    page: int = 0,
+    page_size: int = 20,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    if keys:
-        for k in keys:
-            kid = k.get('key_id')
-            email = k.get('key_email') or '—'
-            expiry = k.get('expiry_date') or '—'
-            title = f"#{kid} • {email[:24]} • до {expiry}"
-            builder.button(text=title, callback_data=f"admin_edit_key_{kid}")
-    else:
+    # Если ключей нет — показываем заглушку и кнопки назад
+    if not keys:
         builder.button(text="Ключей на хосте нет", callback_data="noop")
+        builder.button(text="⬅️ К выбору хоста", callback_data="admin_hostkeys_back_to_hosts")
+        builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+        builder.adjust(1)
+        return builder.as_markup()
+
+    # Пагинация
+    start = page * page_size
+    end = start + page_size
+    for k in keys[start:end]:
+        kid = k.get('key_id')
+        email = k.get('key_email') or '—'
+        expiry = k.get('expiry_date') or '—'
+        title = f"#{kid} • {email[:24]} • до {expiry}"
+        builder.button(text=title, callback_data=f"admin_edit_key_{kid}")
+
+    total = len(keys)
+    have_prev = page > 0
+    have_next = end < total
+    if have_prev:
+        builder.button(text="⬅️ Назад", callback_data=f"admin_hostkeys_page_{page-1}")
+    if have_next:
+        builder.button(text="Вперёд ➡️", callback_data=f"admin_hostkeys_page_{page+1}")
+
+    # Кнопки навигации
     builder.button(text="⬅️ К выбору хоста", callback_data="admin_hostkeys_back_to_hosts")
     builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
-    builder.adjust(1)
+
+    # Сетка: список (по 1 в ряд) + пагинация (1 или 2 в ряд) + две кнопки назад
+    rows = [1] * len(keys[start:end])
+    tail = []
+    if have_prev or have_next:
+        tail.append(2 if (have_prev and have_next) else 1)
+    tail.extend([1, 1])
+    builder.adjust(*(rows + tail if rows else ([2] if (have_prev or have_next) else []) + [1, 1]))
     return builder.as_markup()
 
 def create_admin_months_pick_keyboard(action: str = "gift") -> InlineKeyboardMarkup:
