@@ -471,7 +471,7 @@ def create_webhook_app(bot_controller_instance):
                 )
                 if result and result.get('connection_string'):
                     cs = html_escape.escape(result['connection_string'])
-                    text += f"\nПодключение:\n<pre><code>{cs}</code></pre>"
+                    text += f"\nПодключение:\n<code>{cs}</code>"
                 loop = current_app.config.get('EVENT_LOOP')
                 if loop and loop.is_running():
                     asyncio.run_coroutine_threadsafe(
