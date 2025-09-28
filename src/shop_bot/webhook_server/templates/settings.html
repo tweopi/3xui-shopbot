@@ -653,6 +653,31 @@
                 <button type="button" class="btn btn-outline-secondary toggle-password">👁️</button>
               </div>
             </div>
+            <div class="mb-3">
+              <label class="form-label" for="yoomoney_client_id">YooMoney client_id (для OAuth)</label>
+              <input class="form-control" type="text" id="yoomoney_client_id" name="yoomoney_client_id" value="{{ settings.yoomoney_client_id or '' }}" />
+            </div>
+            <div class="mb-3 password-wrapper">
+              <label class="form-label" for="yoomoney_client_secret">YooMoney client_secret (опционально)</label>
+              <div class="d-flex gap-2">
+                <input class="form-control" type="password" id="yoomoney_client_secret" name="yoomoney_client_secret" value="{{ settings.yoomoney_client_secret or '' }}" />
+                <button type="button" class="btn btn-outline-secondary toggle-password">👁️</button>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="yoomoney_redirect_uri">Redirect URI (для OAuth)</label>
+              <input class="form-control" type="url" id="yoomoney_redirect_uri" name="yoomoney_redirect_uri" value="{{ settings.yoomoney_redirect_uri or '' }}" placeholder="https://example.com/yoomoney/callback" />
+              <div class="form-text text-secondary">Если не заполнено — будет использован URL панели: {{ request.url_root | trim('/') }}/yoomoney/callback</div>
+            </div>
+            <div class="mb-3 d-flex flex-wrap gap-2">
+              <a class="btn btn-outline-primary" href="{{ url_for('yoomoney_connect_route') }}" title="Открыть окно авторизации YooMoney для выдачи токена">Подключить YooMoney (OAuth)</a>
+              <button type="submit"
+                      class="btn btn-outline-secondary"
+                      formmethod="post"
+                      formaction="{{ url_for('yoomoney_check_route') }}">
+                Проверить токен YooMoney
+              </button>
+            </div>
             {# === / ВСТАВКА КОНЧИЛАСЬ === #}
 
 					</div> <!-- /card-body -->
@@ -691,7 +716,7 @@
                         <div class="mb-3">
                             <label class="form-label" for="howto_windows_text">Инструкция: Windows</label>
                             <textarea class="form-control" id="howto_windows_text" name="howto_windows_text" rows="8">{{ settings.howto_windows_text or "" }}</textarea>
-                            <div class="form-hинt">Текст, который видит пользователь при выборе инструкции для Windows.</div>
+                            <div class="form-hint">Текст, который видит пользователь при выборе инструкции для Windows.</div>
                         </div>
 
                         <div class="mb-3">

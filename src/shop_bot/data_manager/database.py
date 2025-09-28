@@ -1,4 +1,4 @@
-import sqlite3
+﻿import sqlite3
 from datetime import datetime
 import logging
 from pathlib import Path
@@ -225,6 +225,9 @@ def initialize_db():
                 "yoomoney_enabled": "false",
                 "yoomoney_wallet": None,
                 "yoomoney_api_token": None,
+                "yoomoney_client_id": None,
+                "yoomoney_client_secret": None,
+                "yoomoney_redirect_uri": None,
             }
             run_migration()
             for key, value in default_settings.items():

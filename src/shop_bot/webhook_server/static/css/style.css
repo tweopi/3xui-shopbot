@@ -2098,25 +2098,43 @@ body.login-page {
 	margin-left: auto;
 }
 
-.ticket-actions {
-	margin-top: 16px;
+/* ===== Settings: фиксированная нижняя панель сохранения и выравнивание контента ===== */
+/* Кнопка сохранения всегда фиксирована снизу слева на странице настроек */
+.settings-column-right form > .text-end.mt-3 {
+  position: fixed;
+  left: 28px; /* совпадает с боковым padding у .container */
+  bottom: 24px;
+  z-index: 50;
+  text-align: left; /* переопределяем .text-end */
+  background: color-mix(in oklab, var(--bg-surface) 86%, transparent);
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--ui-radius) + 2px);
+  padding: 10px 12px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.22);
+  backdrop-filter: blur(8px) saturate(130%);
+  -webkit-backdrop-filter: blur(8px) saturate(130%);
 }
 
-.ticket-actions textarea[name="message"] {
-	width: 100%;
-	background: #343a40;
-	color: var(--light-color);
-	border: 1px solid var(--border-color);
-	border-radius: 6px;
-	padding: 10px;
-}
+/* Чтобы панель не перекрывала нижний контент формы */
+.settings-column-right form { padding-bottom: 84px; }
 
-.ticket-actions .buttons {
-	display: flex;
-	gap: 10px;
-	margin-top: 10px;
+/* Секция Контента (#content): элементы вне .card-body — добавим паддинги */
+#content .card > label.form-label,
+#content .card > textarea.form-control,
+#content .card > .form-hint,
+#content .card > .form-text {
+  display: block;
+  padding-left: 16px;
+  padding-right: 16px;
 }
+#content .card > textarea.form-control { margin-bottom: 16px; }
+#content .card > .mb-3 { padding: 0 16px; }
+#content .card > hr { margin-left: 16px; margin-right: 16px; }
+#content .card > .row { padding: 0 12px; }
 
 @media (max-width: 600px) {
-	.chat-message { max-width: 100%; }
+  .settings-column-right form > .text-end.mt-3 { left: 12px; bottom: 16px; padding: 8px 10px; }
+  .settings-column-right form { padding-bottom: 72px; }
+  #content .card > .mb-3 { padding: 0 12px; }
+  #content .card > .row { padding: 0 8px; }
 }

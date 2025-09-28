@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import os
 import uuid
 import qrcode
@@ -518,11 +518,11 @@ def get_user_router() -> Router:
         await callback.answer("Проверяю оплату…")
         payment_id = callback.data[len("check_yoomoney_"):]
         if not payment_id:
-            await callback.message.edit_text("❌ Некорректные данные для проверки.")
+            await callback.answer("❌ Некорректные данные для проверки.", show_alert=True)
             return
         op = await _yoomoney_find_payment(payment_id)
         if not op:
-            await callback.message.edit_text("Платёж не найден или не завершён. Подождите и попробуйте ещё раз.")
+            await callback.answer("Платёж не найден или не завершён. Подождите и попробуйте ещё раз.", show_alert=True)
             return
         # Завершим pending‑транзакцию и извлечём метаданные
         try:

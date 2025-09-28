@@ -1,4 +1,4 @@
-import os
+﻿import os
 import logging
 import asyncio
 import json
@@ -14,7 +14,8 @@ from math import ceil
 from flask import Flask, request, render_template, redirect, url_for, flash, session, current_app, jsonify, send_file
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 import secrets
-
+import urllib.parse
+import urllib.request
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
@@ -76,6 +77,7 @@ ALL_SETTINGS_KEYS = [
     "stars_enabled", "stars_per_rub", "stars_title", "stars_description",
     # YooMoney (separate)
     "yoomoney_enabled", "yoomoney_wallet", "yoomoney_api_token",
+    "yoomoney_client_id", "yoomoney_client_secret", "yoomoney_redirect_uri",
 ]
 
 def create_webhook_app(bot_controller_instance):
@@ -1604,4 +1606,115 @@ def create_webhook_app(bot_controller_instance):
             logger.error(f"Ошибка в обработчике вебхука TonAPI: {e}", exc_info=True)
             return 'Error', 500
 
+    # --- YooMoney OAuth integration ---
+    def _ym_get_redirect_uri():
+        try:
+            saved = (get_setting("yoomoney_redirect_uri") or "").strip()
+        except Exception:
+            saved = ""
+        if saved:
+            return saved
+        # Fallback: build from current host
+        root = request.url_root.rstrip('/')
+        return f"{root}/yoomoney/callback"
+
+    @flask_app.route('/yoomoney/connect')
+    @login_required
+    def yoomoney_connect_route():
+        client_id = (get_setting('yoomoney_client_id') or '').strip()
+        if not client_id:
+            flash('Укажите YooMoney client_id в настройках.', 'warning')
+            return redirect(url_for('settings_page', tab='payments'))
+        redirect_uri = _ym_get_redirect_uri()
+        scope = 'operation-history operation-details account-info'
+        qs = urllib.parse.urlencode({
+            'client_id': client_id,
+            'response_type': 'code',
+            'scope': scope,
+            'redirect_uri': redirect_uri,
+        })
+        url = f"https://yoomoney.ru/oauth/authorize?{qs}"
+        return redirect(url)
+
+    @csrf.exempt
+    @flask_app.route('/yoomoney/callback')
+    def yoomoney_callback_route():
+        code = (request.args.get('code') or '').strip()
+        if not code:
+            flash('YooMoney: не получен code из OAuth.', 'danger')
+            return redirect(url_for('settings_page', tab='payments'))
+        client_id = (get_setting('yoomoney_client_id') or '').strip()
+        client_secret = (get_setting('yoomoney_client_secret') or '').strip()
+        redirect_uri = _ym_get_redirect_uri()
+        data = {
+            'grant_type': 'authorization_code',
+            'code': code,
+            'client_id': client_id,
+            'redirect_uri': redirect_uri,
+        }
+        if client_secret:
+            data['client_secret'] = client_secret
+        try:
+            encoded = urllib.parse.urlencode(data).encode('utf-8')
+            req = urllib.request.Request('https://yoomoney.ru/oauth/token', data=encoded, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_text = resp.read().decode('utf-8', errors='ignore')
+            try:
+                payload = json.loads(resp_text)
+            except Exception:
+                payload = {}
+            token = (payload.get('access_token') or '').strip()
+            if not token:
+                flash(f"Не удалось получить access_token от YooMoney: {payload}", 'danger')
+                return redirect(url_for('settings_page', tab='payments'))
+            update_setting('yoomoney_api_token', token)
+            flash('YooMoney: токен успешно сохранён.', 'success')
+        except Exception as e:
+            logger.error(f"YooMoney OAuth callback error: {e}", exc_info=True)
+            flash(f'Ошибка при обмене кода на токен: {e}', 'danger')
+        return redirect(url_for('settings_page', tab='payments'))
+
+    @flask_app.route('/yoomoney/check', methods=['GET','POST'])
+    @login_required
+    def yoomoney_check_route():
+        token = (get_setting('yoomoney_api_token') or '').strip()
+        if not token:
+            flash('YooMoney: токен не задан.', 'warning')
+            return redirect(url_for('settings_page', tab='payments'))
+        # 1) account-info
+        try:
+            req = urllib.request.Request('https://yoomoney.ru/api/account-info', headers={'Authorization': f'Bearer {token}'}, method='POST')
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                ai_text = resp.read().decode('utf-8', errors='ignore')
+                ai_status = resp.status
+                ai_headers = dict(resp.headers)
+        except Exception as e:
+            flash(f'YooMoney account-info: ошибка запроса: {e}', 'danger')
+            return redirect(url_for('settings_page', tab='payments'))
+        try:
+            ai = json.loads(ai_text)
+        except Exception:
+            ai = {}
+        if ai_status != 200:
+            www = ai_headers.get('WWW-Authenticate', '')
+            flash(f"YooMoney account-info HTTP {ai_status}. {www}", 'danger')
+            return redirect(url_for('settings_page', tab='payments'))
+        account = ai.get('account') or ai.get('account_number') or '—'
+        # 2) operation-history minimal
+        try:
+            body = urllib.parse.urlencode({'records': '1'}).encode('utf-8')
+            req2 = urllib.request.Request('https://yoomoney.ru/api/operation-history', data=body, headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/x-www-form-urlencoded'})
+            with urllib.request.urlopen(req2, timeout=15) as resp2:
+                oh_text = resp2.read().decode('utf-8', errors='ignore')
+                oh_status = resp2.status
+        except Exception as e:
+            flash(f'YooMoney operation-history: ошибка запроса: {e}', 'warning')
+            oh_status = None
+        if oh_status == 200:
+            flash(f'YooMoney: токен валиден. Кошелёк: {account}', 'success')
+        elif oh_status is not None:
+            flash(f'YooMoney operation-history HTTP {oh_status}. Проверьте scope operation-history и соответствие кошелька.', 'danger')
+        else:
+            flash('YooMoney: не удалось проверить operation-history.', 'warning')
+        return redirect(url_for('settings_page', tab='payments'))
     return flask_app
