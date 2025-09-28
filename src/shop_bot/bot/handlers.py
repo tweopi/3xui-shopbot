@@ -1485,17 +1485,64 @@ def get_user_router() -> Router:
     @user_router.callback_query(PaymentProcess.waiting_for_email, F.data == "back_to_plans")
     async def back_to_plans_handler(callback: types.CallbackQuery, state: FSMContext):
         data = await state.get_data()
-        await state.clear()
-        
         action = data.get('action')
-
-        if action == 'new':
-            await buy_new_key_handler(callback)
-        elif action == 'extend':
-            await extend_key_handler(callback)
-        else:
-            await back_to_main_menu_handler(callback)
-
+        host_name = data.get('host_name')
+        key_id = data.get('key_id')
+    
+        try:
+            await callback.answer()
+        except Exception:
+            pass
+    
+        try:
+            if action == 'extend' and host_name and (key_id is not None):
+                plans = get_plans_for_host(host_name)
+                if plans:
+                    await callback.message.edit_text(
+                        f"Выберите тариф для продления ключа на сервере \"{host_name}\":",
+                        reply_markup=keyboards.create_plans_keyboard(
+                            plans=plans,
+                            action="extend",
+                            host_name=host_name,
+                            key_id=int(key_id)
+                        )
+                    )
+                else:
+                    await callback.message.edit_text(
+                        f"❌ Для сервера \"{host_name}\" не настроены тарифы."
+                    )
+            elif action == 'new' and host_name:
+                plans = get_plans_for_host(host_name)
+                if plans:
+                    await callback.message.edit_text(
+                        "Выберите тариф для нового ключа:",
+                        reply_markup=keyboards.create_plans_keyboard(
+                            plans=plans,
+                            action="new",
+                            host_name=host_name
+                        )
+                    )
+                else:
+                    await callback.message.edit_text(
+                        f"❌ Для сервера \"{host_name}\" не настроены тарифы."
+                    )
+            elif action == 'new':
+                hosts = get_all_hosts()
+                if not hosts:
+                    await callback.message.edit_text("❌ В данный момент нет доступных серверов для покупки.")
+                else:
+                    await callback.message.edit_text(
+                        "Выберите сервер, на котором хотите приобрести ключ:",
+                        reply_markup=keyboards.create_host_selection_keyboard(hosts, action="new")
+                    )
+            else:
+                await show_main_menu(callback.message, edit_message=True)
+        finally:
+            try:
+                await state.clear()
+            except Exception:
+                pass
+    
     @user_router.message(PaymentProcess.waiting_for_email)
     async def process_email_handler(message: types.Message, state: FSMContext):
         if is_valid_email(message.text):
