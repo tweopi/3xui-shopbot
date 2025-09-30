@@ -1,3 +1,5 @@
+from aiogram import html
+
 CHOOSE_PLAN_MESSAGE = "Выберите подходящий тариф:"
 CHOOSE_PAYMENT_METHOD_MESSAGE = "Выберите удобный способ оплаты:"
 VPN_INACTIVE_TEXT = "❌ <b>Статус VPN:</b> Неактивен (срок истек)"
@@ -25,7 +27,7 @@ def get_key_info_text(key_number, expiry_date, created_date, connection_string):
         f"<b>🔑 Информация о ключе #{key_number}</b>\n\n"
         f"<b>➕ Приобретён:</b> {created_formatted}\n"
         f"<b>⏳ Действителен до:</b> {expiry_formatted}\n\n"
-        f"<code>{connection_string}</code>"
+        f"{html.code(connection_string)}"
     )
 
 def get_purchase_success_text(action: str, key_number: int, expiry_date, connection_string: str):
@@ -35,5 +37,5 @@ def get_purchase_success_text(action: str, key_number: int, expiry_date, connect
     return (
         f"🎉 <b>Ваш ключ #{key_number} {action_text}!</b>\n\n"
         f"⏳ <b>Он будет действовать до:</b> {expiry_formatted}\n\n"
-        f"<code>{connection_string}</code>"
+        f"{html.code(connection_string)}"
     )

@@ -133,9 +133,13 @@ def update_or_create_client_on_panel(api: Api, inbound_id: int, email: str, days
                 sub_token_existing = None
                 for attr in ("subId", "subscription", "sub_id"):
                     if hasattr(existing_client, attr):
-                        sub_token_existing = getattr(existing_client, attr)
-                        break
-                if not sub_token_existing:
+                        val = getattr(existing_client, attr)
+                        if val:
+                            sub_token_existing = val
+                            break
+                if sub_token_existing:
+                    client_sub_token = sub_token_existing
+                else:
                     import secrets
                     client_sub_token = secrets.token_hex(12)
                     for attr in ("subId", "subscription", "sub_id"):
