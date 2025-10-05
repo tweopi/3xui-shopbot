@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Монитор ресурсов{% endblock %}
+{% block content %}
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">Монитор ресурсов</h2>
+      <div class="text-secondary">Локальные ресурсы панели и состояние подключённых хостов</div>
+    </div>
+  </div>
+</div>
+
+<div class="row row-cards" id="monitor-root">
+  <!-- Local metrics -->
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Локальные ресурсы (панель)</h3></div>
+      <div class="card-body">
+        <div id="local-error" class="alert alert-danger d-none"></div>
+        <div class="row g-3">
+          <div class="col-12">
+            <div class="d-flex justify-content-between"><div>CPU</div><div><span id="cpu-percent">—</span>%</div></div>
+            <div class="progress">
+              <div id="cpu-bar" class="progress-bar" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="d-flex justify-content-between"><div>Память</div><div><span id="mem-used">—</span> / <span id="mem-total">—</span> (<span id="mem-percent">—</span>%)</div></div>
+            <div class="progress">
+              <div id="mem-bar" class="progress-bar bg-purple" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="d-flex justify-content-between"><div>Диск</div><div><span id="disk-used">—</span> / <span id="disk-total">—</span> (<span id="disk-percent">—</span>%)</div></div>
+            <div class="progress">
+              <div id="disk-bar" class="progress-bar bg-green" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="small text-secondary">Load average: <span id="loadavg">—</span> · Uptime: <span id="uptime">—</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hosts metrics -->
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <h3 class="card-title">Хосты (SSH)</h3>
+        <button class="btn btn-outline-secondary btn-sm" id="refresh-hosts">Обновить</button>
+      </div>
+      <div class="card-body">
+        <div id="hosts-error" class="alert alert-warning d-none"></div>
+        <div class="table-responsive">
+          <table class="table table-vcenter">
+            <thead>
+              <tr>
+                <th>Хост</th>
+                <th class="text-nowrap">CPU</th>
+                <th class="text-nowrap">Load</th>
+                <th class="text-nowrap">Память</th>
+                <th class="text-nowrap">Диск</th>
+                <th>Uptime</th>
+              </tr>
+            </thead>
+            <tbody id="hosts-tbody">
+              <tr><td colspan="6" class="text-secondary">Загрузка…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="small text-secondary">Показываются только хосты с настроенным SSH в разделе «Настройки → Управление хостами».</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Metrics charts -->
+<div class="card mt-3" id="metrics-card">
+  <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+    <h3 class="card-title me-auto">Графики метрик</h3>
+    <select id="mh-host" class="form-select form-select-sm" style="max-width:220px"></select>
+    <select id="mh-metric" class="form-select form-select-sm" style="max-width:180px">
+      <option value="cpu_percent">CPU %</option>
+      <option value="mem_percent">RAM %</option>
+      <option value="disk_percent">Disk %</option>
+    </select>
+    <select id="mh-range" class="form-select form-select-sm" style="max-width:140px">
+      <option value="60" selected>60 точек</option>
+      <option value="120">120 точек</option>
+      <option value="240">240 точек</option>
+    </select>
+    <button id="mh-refresh" class="btn btn-outline-primary btn-sm">Обновить</button>
+  </div>
+  <div class="card-body">
+    <div class="chart" style="height: 300px">
+      <canvas id="mh-canvas"></canvas>
+    </div>
+  </div>
+</div><script>
+(function(){
+  const CPU_WARN=85, MEM_WARN=85, DISK_WARN=90;
+  const fmtBytes = (v)=>{
+    if (v == null) return '—';
+    const units = ['Б','КБ','МБ','ГБ','ТБ'];
+    let i=0, n=Number(v);
+    while(n >= 1024 && i < units.length-1){ n/=1024; i++; }
+    return n.toFixed(n>=10?0:1)+' '+units[i];
+  };
+  const fmtLoad = (l)=> l && l['1m']!=null ? `${l['1m'].toFixed(2)} / ${l['5m'].toFixed(2)} / ${l['15m'].toFixed(2)}` : '—';
+  const fmtUptime = (s)=>{
+    if (!s && s!==0) return '—';
+    const d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60);
+    const parts=[]; if(d) parts.push(d+'д'); if(h) parts.push(h+'ч'); parts.push(m+'м');
+    return parts.join(' ');
+  };
+
+  async function loadLocal(){
+    const errBox = document.getElementById('local-error');
+    try{
+      const r = await fetch("{{ url_for('monitor_local_json') }}", {headers:{'Accept':'application/json'}});
+      const j = await r.json();
+      if(!j.ok){ throw new Error(j.error||'error'); }
+      errBox.classList.add('d-none');
+      document.getElementById('cpu-percent').textContent = j.cpu_percent!=null? j.cpu_percent.toFixed(0) : '—';
+      document.getElementById('cpu-bar').style.width = (j.cpu_percent||0)+'%';
+      document.getElementById('mem-used').textContent = fmtBytes(j.mem_used);
+      document.getElementById('mem-total').textContent = fmtBytes(j.mem_total);
+      document.getElementById('mem-percent').textContent = j.mem_percent!=null? j.mem_percent.toFixed(0):'—';
+      document.getElementById('mem-bar').style.width = (j.mem_percent||0)+'%';
+      document.getElementById('disk-used').textContent = fmtBytes(j.disk_used);
+      document.getElementById('disk-total').textContent = fmtBytes(j.disk_total);
+      document.getElementById('disk-percent').textContent = j.disk_percent!=null? j.disk_percent.toFixed(0):'—';
+      document.getElementById('disk-bar').style.width = (j.disk_percent||0)+'%';
+      document.getElementById('loadavg').textContent = fmtLoad(j.loadavg);
+      document.getElementById('uptime').textContent = fmtUptime(j.uptime_seconds);
+    }catch(e){
+      errBox.textContent = 'Не удалось получить локальные метрики: '+e;
+      errBox.classList.remove('d-none');
+    }
+  }
+
+  function renderHostRow(m){
+    const ok = !!m.ok;
+    const cpu = m.cpu_count? m.loadavg && m.loadavg['1m']!=null ? Math.min(100, (m.loadavg['1m']/m.cpu_count)*100) : null : null;
+    return `<tr>
+      <td class="text-nowrap">${m.host_name||'—'} ${ok? '': '<span class="badge bg-red-lt ms-1">ошибка</span>'}</td>
+      <td>${cpu!=null? cpu.toFixed(0)+'%':'—'}</td>
+      <td>${fmtLoad(m.loadavg)}</td>
+      <td>${fmtBytes(m.mem_used)} / ${fmtBytes(m.mem_total)}</td>
+      <td>${fmtBytes(m.disk_used)} / ${fmtBytes(m.disk_total)}</td>
+      <td>${fmtUptime(m.uptime_seconds)}</td>
+    </tr>`;
+  }
+
+  async function loadHosts(){
+    const err = document.getElementById('hosts-error');
+    const tb = document.getElementById('hosts-tbody');
+    try{
+      const r = await fetch("{{ url_for('monitor_hosts_json') }}", {headers:{'Accept':'application/json'}});
+      const j = await r.json();
+      if(!j.ok){ throw new Error(j.error||'error'); }
+      err.classList.add('d-none');
+      const items = j.items||[];
+      if(!items.length){ tb.innerHTML = '<tr><td colspan="6" class="text-secondary">Нет хостов с настроенным SSH</td></tr>'; return; }
+      tb.innerHTML = items.map(renderHostRow).join('');
+    }catch(e){
+      err.textContent = 'Не удалось получить метрики хостов: '+e;
+      err.classList.remove('d-none');
+      tb.innerHTML = '<tr><td colspan="6" class="text-secondary">Ошибка загрузки</td></tr>';
+    }
+  }
+
+  document.getElementById('refresh-hosts')?.addEventListener('click', loadHosts);
+
+  async function tick(){ await loadLocal(); await loadHosts(); }
+  tick();
+  setInterval(tick, 10000);
+
+  // Charts for metrics history
+  const mhHost = document.getElementById('mh-host');
+  const mhMetric = document.getElementById('mh-metric');
+  const mhRange = document.getElementById('mh-range');
+  const mhRefresh = document.getElementById('mh-refresh');
+  const mhCanvas = document.getElementById('mh-canvas');
+  let mhChart = null;
+
+  async function mhLoadHosts(){
+    try{
+      const r = await fetch("{{ url_for('monitor_hosts_json') }}", {headers:{'Accept':'application/json'}});
+      const j = await r.json();
+      const items = (j.items||[]).filter(it => it && it.host_name);
+      mhHost.innerHTML='';
+      if (!items.length){ mhHost.innerHTML='<option value="">Нет хостов</option>'; return; }
+      for (const it of items){ const o=document.createElement('option'); o.value=it.host_name; o.textContent=it.host_name; mhHost.appendChild(o); }
+    }catch(_){ mhHost.innerHTML='<option value="">Ошибка загрузки</option>'; }
+  }
+
+  async function mhDraw(){
+    if (!mhCanvas) return;
+    const host = mhHost?.value; if (!host) return;
+    const limit = parseInt(mhRange.value||'60', 10);
+    const url = `{{ url_for('monitor_host_metrics_json', host_name='__H__') }}`.replace('__H__', encodeURIComponent(host)) + `?limit=${limit}`;
+    try{
+      const r = await fetch(url, {headers:{'Accept':'application/json'}});
+      const j = await r.json(); if (!j.ok) return;
+      const arr = (j.items||[]).slice().reverse();
+      const labels = arr.map(x => x.created_at);
+      const metric = mhMetric.value || 'cpu_percent';
+      const data = arr.map(x => Number(x[metric]||0));
+      const ctx = mhCanvas.getContext('2d');
+      if (mhChart) mhChart.destroy();
+      const color = metric==='mem_percent'? '#ae3ec9' : (metric==='disk_percent'? '#2fb344' : '#206bc4');
+      mhChart = new Chart(ctx, { type:'line', data:{ labels, datasets:[{ label: metric, data, borderColor: color, backgroundColor:'rgba(32,107,196,0.08)', borderWidth:2, fill:true, tension:0.3, pointRadius:0 }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:true}, tooltip:{enabled:true}, zoom:{ zoom:{ wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'} } }, scales:{ y:{ beginAtZero:true, suggestedMax:100 } } } });
+    }catch(_){ }
+  }
+
+  mhRefresh?.addEventListener('click', mhDraw);
+  mhMetric?.addEventListener('change', mhDraw);
+  mhRange?.addEventListener('change', mhDraw);
+  mhHost?.addEventListener('change', mhDraw);
+
+  (async function(){ await mhLoadHosts(); await mhDraw(); })();})();
+</script>
+{% endblock %}
+

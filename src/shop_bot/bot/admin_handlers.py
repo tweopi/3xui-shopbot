@@ -4,7 +4,9 @@ import time
 import uuid
 import re
 import html as html_escape
-from datetime import datetime
+from datetime import datetime, timedelta
+import secrets
+import string
 
 from aiogram import Bot, Router, F, types
 from aiogram.filters import Command, StateFilter
@@ -14,6 +16,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from shop_bot.bot import keyboards
 from shop_bot.data_manager import speedtest_runner
+from shop_bot.data_manager import resource_monitor, database
 from shop_bot.data_manager.database import (
     get_all_users,
     get_setting,
@@ -38,6 +41,11 @@ from shop_bot.data_manager.database import (
     get_referral_count,
     get_referral_balance_all,
     get_referrals_for_user,
+    # Promo API
+    create_promo_code,
+    list_promo_codes,
+    update_promo_code_status,
+    get_promo_code,
 )
 from shop_bot.data_manager import backup_manager
 from shop_bot.bot.handlers import show_main_menu
@@ -106,6 +114,99 @@ def get_admin_router() -> Router:
         else:
             await message.answer(text, reply_markup=keyboard)
 
+    def _format_monitor_metrics() -> tuple[str, dict[str, float]]:
+        local = resource_monitor.get_local_metrics()
+        hosts = []
+        try:
+            hosts = database.get_all_hosts() or []
+        except Exception:
+            hosts = []
+        pieces = []
+        worst: dict[str, float] = {
+            'cpu_percent': 0.0,
+            'mem_percent': 0.0,
+            'disk_percent': 0.0,
+        }
+
+        def _add_line(title: str, ok: bool, cpu: float | None, mem: float | None, disk: float | None, load: dict | None, uptime: float | None, extra: str | None = None) -> str:
+            cpu_txt = f"CPU {cpu:.0f}%" if cpu is not None else "CPU —"
+            mem_txt = f"RAM {mem:.0f}%" if mem is not None else "RAM —"
+            disk_txt = f"Disk {disk:.0f}%" if disk is not None else "Disk —"
+            load_txt = ""
+            if load and load.get('1m') is not None:
+                load_txt = f" | load {load.get('1m'):.2f}/{load.get('5m'):.2f}/{load.get('15m'):.2f}"
+            uptime_txt = ""
+            if uptime is not None:
+                days = int(uptime // 86400)
+                hours = int((uptime % 86400) // 3600)
+                uptime_txt = f" | uptime {days}д {hours}ч"
+            status = "✅" if ok else "❌"
+            line = f"{status} <b>{title}</b>: {cpu_txt} · {mem_txt} · {disk_txt}{load_txt}{uptime_txt}"
+            if extra:
+                line += f"\n    {extra}"
+            return line
+
+        cpu_local = local.get('cpu_percent') if isinstance(local, dict) else None
+        mem_local = local.get('mem_percent') if isinstance(local, dict) else None
+        disk_local = local.get('disk_percent') if isinstance(local, dict) else None
+        pieces.append(_add_line(
+            "Панель",
+            bool(local.get('ok')),
+            cpu_local,
+            mem_local,
+            disk_local,
+            local.get('loadavg'),
+            local.get('uptime_seconds'),
+            extra=(local.get('error') if not local.get('ok') else None)
+        ))
+        for name in [h.get('host_name') for h in hosts if h.get('ssh_host') and h.get('ssh_user')]:
+            metrics = database.get_latest_host_metrics(name) or {}
+            ok = bool(metrics.get('ok'))
+            cpu = metrics.get('cpu_percent')
+            mem = metrics.get('mem_percent')
+            disk = metrics.get('disk_percent')
+            pieces.append(_add_line(
+                f"Хост {name}",
+                ok,
+                cpu,
+                mem,
+                disk,
+                {'1m': metrics.get('load1'), '5m': metrics.get('load5'), '15m': metrics.get('load15')},
+                metrics.get('uptime_seconds'),
+                extra=(metrics.get('error') if not ok else None)
+            ))
+            if isinstance(cpu, (int, float)) and cpu > worst['cpu_percent']:
+                worst['cpu_percent'] = float(cpu)
+            if isinstance(mem, (int, float)) and mem > worst['mem_percent']:
+                worst['mem_percent'] = float(mem)
+            if isinstance(disk, (int, float)) and disk > worst['disk_percent']:
+                worst['disk_percent'] = float(disk)
+
+        text = "📈 <b>Мониторинг системных ресурсов</b>\n" + "\n".join(pieces)
+        return text, worst
+
+    async def _send_monitor_view(message: types.Message, edit_message: bool = False):
+        text, worst = _format_monitor_metrics()
+        suffix = ""
+        warn_parts = []
+        if worst['cpu_percent'] >= 85:
+            warn_parts.append(f"CPU {worst['cpu_percent']:.0f}%")
+        if worst['mem_percent'] >= 85:
+            warn_parts.append(f"RAM {worst['mem_percent']:.0f}%")
+        if worst['disk_percent'] >= 90:
+            warn_parts.append(f"Disk {worst['disk_percent']:.0f}%")
+        if warn_parts:
+            suffix = "\n\n⚠️ <b>Внимание:</b> " + ", ".join(warn_parts) + ""
+        keyboard = keyboards.create_admin_monitor_keyboard()
+        full_text = text + suffix
+        if edit_message:
+            try:
+                await message.edit_text(full_text, reply_markup=keyboard)
+            except Exception:
+                pass
+        else:
+            await message.answer(full_text, reply_markup=keyboard)
+
     @admin_router.callback_query(F.data == "admin_menu")
     async def open_admin_menu_handler(callback: types.CallbackQuery):
         if not is_admin(callback.from_user.id):
@@ -113,6 +214,22 @@ def get_admin_router() -> Router:
             return
         await callback.answer()
         await show_admin_menu(callback.message, edit_message=True)
+
+    @admin_router.callback_query(F.data == "admin_monitor")
+    async def admin_monitor_open(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await _send_monitor_view(callback.message, edit_message=True)
+
+    @admin_router.callback_query(F.data == "admin_monitor_refresh")
+    async def admin_monitor_refresh(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await _send_monitor_view(callback.message, edit_message=True)
 
     # --- Speedtest: кнопка в админ-меню -> выбор хоста ---
     @admin_router.callback_query(F.data == "admin_speedtest")
@@ -370,6 +487,558 @@ def get_admin_router() -> Router:
         else:
             await callback.message.answer(text)
 
+    # --- Промокоды: меню ---
+    @admin_router.callback_query(F.data == "admin_promo_menu")
+    async def admin_promo_menu(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await callback.message.edit_text(
+            "🎟 <b>Управление промокодами</b>",
+            reply_markup=keyboards.create_admin_promos_menu_keyboard()
+        )
+
+    # --- Промокоды: список ---
+    @admin_router.callback_query(F.data == "admin_promo_list")
+    async def admin_promo_list(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        promos = list_promo_codes(include_inactive=True) or []
+        if not promos:
+            text = "📋 Промокоды отсутствуют."
+        else:
+            lines = []
+            for p in promos:
+                code = p.get('code')
+                active = p.get('is_active') if 'is_active' in p else p.get('active', 1)
+                used_total = p.get('used_total') if p.get('used_total') is not None else p.get('used_count', 0)
+                limit_total = p.get('usage_limit_total')
+                vf = p.get('valid_from') or '—'
+                vu = p.get('valid_until') or p.get('valid_to') or '—'
+                disc = None
+                if p.get('discount_percent'):
+                    disc = f"{float(p.get('discount_percent')):.0f}%"
+                elif p.get('discount_amount'):
+                    disc = f"{float(p.get('discount_amount')):.2f} RUB"
+                disc = disc or '—'
+                limit_str = f"{used_total}/{limit_total}" if limit_total else f"{used_total}"
+                lines.append(f"• <b>{code}</b> — {'✅' if active else '❌'} | скидка: {disc} | исх./лим.: {limit_str} | {vf} → {vu}")
+            text = "\n".join(lines)
+        kb = InlineKeyboardBuilder()
+        # Кнопки переключения активности для первых 10 кодов (чтобы не взрывать клавиатуру)
+        for p in (promos[:10] if promos else []):
+            code = p.get('code')
+            is_act = p.get('is_active') if 'is_active' in p else p.get('active', 1)
+            label = f"{'🧯 Выкл' if is_act else '✅ Вкл'} {code}"
+            kb.button(text=label, callback_data=f"admin_promo_toggle_{code}")
+        kb.button(text="⬅️ В меню промокодов", callback_data="admin_promo_menu")
+        kb.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+        # 1 код на строку, затем 1 и 1
+        rows = [1] * (len(promos[:10]) if promos else 0)
+        rows += [1, 1]
+        kb.adjust(*rows if rows else [1])
+        try:
+            await callback.message.edit_text(text, reply_markup=kb.as_markup())
+        except Exception:
+            await callback.message.answer(text, reply_markup=kb.as_markup())
+
+    @admin_router.callback_query(F.data.startswith("admin_promo_toggle_"))
+    async def admin_promo_toggle(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        code = callback.data.replace("admin_promo_toggle_", "", 1)
+        try:
+            p = get_promo_code(code)
+            if not p:
+                await callback.message.answer("❌ Промокод не найден.")
+                return
+            current = p.get('is_active') if 'is_active' in p else p.get('active', 1)
+            ok = update_promo_code_status(code, is_active=(0 if current else 1))
+            if ok:
+                await callback.message.answer(f"Готово: {'деактивирован' if current else 'активирован'} {code}")
+            else:
+                await callback.message.answer("❌ Не удалось изменить статус.")
+        except Exception as e:
+            await callback.message.answer(f"❌ Ошибка: {e}")
+        # Обновим список
+        await admin_promo_list(callback)
+
+    # --- Промокоды: создание (мастер) ---
+    class PromoCreate(StatesGroup):
+        waiting_code = State()
+        waiting_discount = State()  # percent:10 или amount:100
+        waiting_limits = State()    # total=100;per_user=1 (опционально)
+        waiting_dates = State()     # from=YYYY-MM-DD;until=YYYY-MM-DD (опционально)
+        waiting_custom_days = State()  # ручной ввод количества дней
+        waiting_description = State()
+        waiting_confirmation = State()
+
+    @admin_router.callback_query(F.data == "admin_promo_create")
+    async def admin_promo_create_start(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await state.set_state(PromoCreate.waiting_code)
+        await callback.message.edit_text(
+            "Введите код промокода (латиница/цифры) или нажмите \"Сгенерировать\":",
+            reply_markup=keyboards.create_admin_promo_code_keyboard()
+        )
+
+    @admin_router.callback_query(PromoCreate.waiting_code, F.data == "admin_promo_gen_code")
+    async def admin_promo_generate_code(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer("Сгенерировано")
+        alphabet = string.ascii_uppercase + string.digits
+        code = "".join(secrets.choice(alphabet) for _ in range(8))
+        await state.update_data(code=code)
+        await state.set_state(PromoCreate.waiting_discount)
+        await callback.message.edit_text(
+            f"Код: <b>{code}</b>\n\nУкажите скидку",
+            reply_markup=keyboards.create_admin_promo_discount_keyboard()
+        )
+
+    @admin_router.message(PromoCreate.waiting_code)
+    async def promo_create_code(message: types.Message, state: FSMContext):
+        code = (message.text or '').strip().upper()
+        if not code or len(code) < 2:
+            await message.answer("❌ Код слишком короткий. Повторите ввод.")
+            return
+        await state.update_data(code=code)
+        await state.set_state(PromoCreate.waiting_discount)
+        await message.answer(
+            "Укажите скидку",
+            reply_markup=keyboards.create_admin_promo_discount_keyboard()
+        )
+
+    # Быстрые кнопки выбора скидки
+    @admin_router.callback_query(PromoCreate.waiting_discount, F.data.startswith("admin_promo_discount_"))
+    async def promo_create_discount_buttons(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        data = callback.data
+        perc = None
+        amt = None
+        # Меню выбора типа
+        if data == "admin_promo_discount_type_percent":
+            await callback.message.edit_text(
+                "Выберите процент скидки или введите вручную:",
+                reply_markup=keyboards.create_admin_promo_discount_percent_menu_keyboard()
+            )
+            return
+        if data == "admin_promo_discount_type_amount":
+            await callback.message.edit_text(
+                "Выберите фиксированную сумму скидки (RUB) или введите вручную:",
+                reply_markup=keyboards.create_admin_promo_discount_amount_menu_keyboard()
+            )
+            return
+        # Переключатели меню
+        if data == "admin_promo_discount_show_amount_menu":
+            await callback.message.edit_text(
+                "Выберите фиксированную сумму скидки (RUB) или введите вручную:",
+                reply_markup=keyboards.create_admin_promo_discount_amount_menu_keyboard()
+            )
+            return
+        if data == "admin_promo_discount_show_percent_menu":
+            await callback.message.edit_text(
+                "Выберите процент скидки или введите вручную:",
+                reply_markup=keyboards.create_admin_promo_discount_percent_menu_keyboard()
+            )
+            return
+        # Ручной ввод
+        if data == "admin_promo_discount_manual_percent":
+            await state.update_data(manual_discount_mode="percent")
+            await callback.message.edit_text(
+                "Введите процент скидки (например, 10). Можно также в формате percent:10",
+                reply_markup=keyboards.create_admin_cancel_keyboard()
+            )
+            return
+        if data == "admin_promo_discount_manual_amount":
+            await state.update_data(manual_discount_mode="amount")
+            await callback.message.edit_text(
+                "Введите фиксированную сумму скидки в RUB (например, 100). Можно также amount:100",
+                reply_markup=keyboards.create_admin_cancel_keyboard()
+            )
+            return
+        # Пресеты
+        if data.startswith("admin_promo_discount_percent_"):
+            try:
+                perc = float(data.rsplit("_", 1)[-1])
+            except Exception:
+                perc = 10.0
+        elif data.startswith("admin_promo_discount_amount_"):
+            try:
+                amt = float(data.rsplit("_", 1)[-1])
+            except Exception:
+                amt = 50.0
+        # Сохраняем и идём дальше
+        await state.update_data(discount_percent=perc, discount_amount=amt, manual_discount_mode=None,
+                                usage_limit_total=None, usage_limit_per_user=None, limits_manual_input=None,
+                                limits_both=False)
+        await state.set_state(PromoCreate.waiting_limits)
+        await callback.message.edit_text(
+            "Лимиты (опционально)",
+            reply_markup=keyboards.create_admin_promo_limits_type_keyboard()
+        )
+
+    @admin_router.message(PromoCreate.waiting_discount)
+    async def promo_create_discount(message: types.Message, state: FSMContext):
+        text = (message.text or '').strip().lower()
+        perc = None
+        amt = None
+        data = await state.get_data()
+        manual_mode = (data.get('manual_discount_mode') or '').strip()
+        try:
+            if text.startswith('percent:'):
+                perc = float(text.split(':', 1)[1].strip())
+            elif text.startswith('amount:'):
+                amt = float(text.split(':', 1)[1].strip())
+            elif manual_mode == 'percent' and re.match(r'^\d+(\.\d+)?$', text):
+                perc = float(text)
+            elif manual_mode == 'amount' and re.match(r'^\d+(\.\d+)?$', text):
+                amt = float(text)
+            else:
+                await message.answer("❌ Формат не распознан. Введите число или percent:10 / amount:100")
+                return
+        except Exception:
+            await message.answer("❌ Не удалось прочитать число. Повторите ввод.")
+            return
+        await state.update_data(discount_percent=perc, discount_amount=amt,
+                                usage_limit_total=None, usage_limit_per_user=None, limits_manual_input=None,
+                                limits_both=False)
+        await state.set_state(PromoCreate.waiting_limits)
+        await message.answer(
+            "Лимиты (опционально)",
+            reply_markup=keyboards.create_admin_promo_limits_type_keyboard()
+        )
+
+    # Кнопки для лимитов (новое меню)
+    @admin_router.callback_query(PromoCreate.waiting_limits, F.data.startswith("admin_promo_limits_"))
+    async def promo_create_limits_buttons(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        data = await state.get_data()
+        # Тип выбора
+        if callback.data == "admin_promo_limits_type_total":
+            await state.update_data(limits_both=False)
+            await callback.message.edit_text(
+                "Общий лимит — выберите значение:",
+                reply_markup=keyboards.create_admin_promo_limits_total_keyboard()
+            )
+            return
+        if callback.data == "admin_promo_limits_type_per":
+            await state.update_data(limits_both=False)
+            await callback.message.edit_text(
+                "Лимит на пользователя — выберите значение:",
+                reply_markup=keyboards.create_admin_promo_limits_per_user_keyboard()
+            )
+            return
+        if callback.data == "admin_promo_limits_type_both":
+            await state.update_data(limits_both=True, usage_limit_total=None, usage_limit_per_user=None)
+            await callback.message.edit_text(
+                "Сначала укажите общий лимит:",
+                reply_markup=keyboards.create_admin_promo_limits_total_keyboard()
+            )
+            return
+        if callback.data == "admin_promo_limits_back_to_type":
+            await callback.message.edit_text(
+                "Лимиты (опционально)",
+                reply_markup=keyboards.create_admin_promo_limits_type_keyboard()
+            )
+            return
+        if callback.data == "admin_promo_limits_skip":
+            await state.set_state(PromoCreate.waiting_dates)
+            await callback.message.edit_text(
+                "Даты (опционально)",
+                reply_markup=keyboards.create_admin_promo_dates_keyboard()
+            )
+            return
+        # Пресеты TOTAL
+        if callback.data.startswith("admin_promo_limits_total_preset_"):
+            try:
+                total = int(callback.data.rsplit("_", 1)[-1])
+            except Exception:
+                total = None
+            await state.update_data(usage_limit_total=total)
+            if data.get('limits_both'):
+                await callback.message.edit_text(
+                    "Теперь укажите лимит на пользователя:",
+                    reply_markup=keyboards.create_admin_promo_limits_per_user_keyboard()
+                )
+                return
+            # один лимит — дальше к датам
+            await state.set_state(PromoCreate.waiting_dates)
+            await callback.message.edit_text(
+                "Даты (опционально)",
+                reply_markup=keyboards.create_admin_promo_dates_keyboard()
+            )
+            return
+        # Пресеты PER USER
+        if callback.data.startswith("admin_promo_limits_per_preset_"):
+            try:
+                per_user = int(callback.data.rsplit("_", 1)[-1])
+            except Exception:
+                per_user = None
+            await state.update_data(usage_limit_per_user=per_user)
+            if data.get('limits_both') and data.get('usage_limit_total') is None:
+                # если вдруг пришли сюда без тотала
+                await callback.message.edit_text(
+                    "Сначала укажите общий лимит:",
+                    reply_markup=keyboards.create_admin_promo_limits_total_keyboard()
+                )
+                return
+            await state.set_state(PromoCreate.waiting_dates)
+            await callback.message.edit_text(
+                "Даты (опционально)",
+                reply_markup=keyboards.create_admin_promo_dates_keyboard()
+            )
+            return
+        # Ручной ввод: переключаемся на ввод числа
+        if callback.data == "admin_promo_limits_total_manual":
+            await state.update_data(limits_manual_input="total")
+            await callback.message.edit_text(
+                "Введите общий лимит (целое число):",
+                reply_markup=keyboards.create_admin_cancel_keyboard()
+            )
+            return
+        if callback.data == "admin_promo_limits_per_manual":
+            await state.update_data(limits_manual_input="per")
+            await callback.message.edit_text(
+                "Введите лимит на пользователя (целое число):",
+                reply_markup=keyboards.create_admin_cancel_keyboard()
+            )
+            return
+
+    @admin_router.message(PromoCreate.waiting_limits)
+    async def promo_create_limits(message: types.Message, state: FSMContext):
+        text = (message.text or '').strip()
+        data = await state.get_data()
+        manual = (data.get('limits_manual_input') or '').strip()
+        if not manual:
+            await message.answer(
+                "Пожалуйста, выберите вариант на клавиатуре.",
+                reply_markup=keyboards.create_admin_promo_limits_type_keyboard()
+            )
+            return
+        # Ручной ввод числа
+        try:
+            val = int(text)
+            if val <= 0:
+                raise ValueError()
+        except Exception:
+            await message.answer("❌ Введите положительное целое число.")
+            return
+        if manual == 'total':
+            await state.update_data(usage_limit_total=val, limits_manual_input=None)
+            if data.get('limits_both'):
+                await message.answer(
+                    "Теперь укажите лимит на пользователя:",
+                    reply_markup=keyboards.create_admin_promo_limits_per_user_keyboard()
+                )
+                return
+        elif manual == 'per':
+            await state.update_data(usage_limit_per_user=val, limits_manual_input=None)
+        # Переход к датам
+        await state.set_state(PromoCreate.waiting_dates)
+        await message.answer(
+            "Даты (опционально)",
+            reply_markup=keyboards.create_admin_promo_dates_keyboard()
+        )
+
+    @admin_router.message(PromoCreate.waiting_dates)
+    async def promo_create_dates(message: types.Message, state: FSMContext):
+        text = (message.text or '').strip()
+        vf = None
+        vu = None
+        if text:
+            parts = [p.strip() for p in text.split(';') if p.strip()]
+            for p in parts:
+                if p.startswith('from='):
+                    vf = p.split('=', 1)[1].strip()
+                elif p.startswith('until='):
+                    vu = p.split('=', 1)[1].strip()
+        # Попробуем привести к isoформату, если это YYYY-MM-DD
+        def _to_iso(d: str | None) -> str | None:
+            if not d:
+                return None
+            try:
+                if len(d) == 10 and d.count('-') == 2:
+                    return datetime.fromisoformat(d).isoformat()
+                # если админ дал уже iso, просто вернём
+                datetime.fromisoformat(d)
+                return d
+            except Exception:
+                return None
+        await state.update_data(valid_from=_to_iso(vf), valid_until=_to_iso(vu))
+        await state.set_state(PromoCreate.waiting_description)
+        await message.answer(
+            "Описание (опционально). Введите текст или оставьте пустым.",
+            reply_markup=keyboards.create_admin_promo_description_keyboard()
+        )
+
+    # Кнопки дат
+    @admin_router.callback_query(PromoCreate.waiting_dates, F.data.startswith("admin_promo_dates_"))
+    async def promo_create_dates_buttons(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        now = datetime.now()
+        vf_iso = None
+        vu_iso = None
+        if callback.data == "admin_promo_dates_skip":
+            pass
+        elif callback.data == "admin_promo_dates_week":
+            vf_iso = now.isoformat()
+            vu_iso = (now + timedelta(days=7)).isoformat()
+        elif callback.data == "admin_promo_dates_month":
+            vf_iso = now.isoformat()
+            vu_iso = (now + timedelta(days=30)).isoformat()
+        elif callback.data.startswith("admin_promo_dates_days_"):
+            try:
+                days = int(callback.data.rsplit("_", 1)[-1])
+                if days <= 0:
+                    raise ValueError()
+            except Exception:
+                days = 7
+            vf_iso = now.isoformat()
+            vu_iso = (now + timedelta(days=days)).isoformat()
+        elif callback.data == "admin_promo_dates_custom_days":
+            # Переходим на ручной ввод
+            await state.set_state(PromoCreate.waiting_custom_days)
+            await callback.message.edit_text(
+                "Введите число дней действия промокода (например, 14):",
+                reply_markup=keyboards.create_admin_cancel_keyboard()
+            )
+            return
+        await state.update_data(valid_from=vf_iso, valid_until=vu_iso)
+        await state.set_state(PromoCreate.waiting_description)
+        await callback.message.edit_text(
+            "Описание (опционально). Введите текст или оставьте пустым.",
+            reply_markup=keyboards.create_admin_promo_description_keyboard()
+        )
+
+    # Ручной ввод количества дней
+    @admin_router.message(PromoCreate.waiting_custom_days)
+    async def promo_create_dates_custom_days(message: types.Message, state: FSMContext):
+        text = (message.text or '').strip()
+        try:
+            days = int(text)
+            if days <= 0 or days > 3650:
+                raise ValueError()
+        except Exception:
+            await message.answer("❌ Введите целое число дней (1–3650)")
+            return
+        now = datetime.now()
+        vf_iso = now.isoformat()
+        vu_iso = (now + timedelta(days=days)).isoformat()
+        await state.update_data(valid_from=vf_iso, valid_until=vu_iso)
+        await state.set_state(PromoCreate.waiting_description)
+        await message.answer(
+            "Описание (опционально). Введите текст или оставьте пустым.",
+            reply_markup=keyboards.create_admin_promo_description_keyboard()
+        )
+
+    @admin_router.message(PromoCreate.waiting_description)
+    async def promo_create_finish(message: types.Message, state: FSMContext):
+        desc = (message.text or '').strip() or None
+        await state.update_data(description=desc)
+        await state.set_state(PromoCreate.waiting_confirmation)
+        await _send_promo_summary(message, state, edit=False)
+
+    # Кнопка пропуска описания -> показать сводку
+    @admin_router.callback_query(PromoCreate.waiting_description, F.data == "admin_promo_desc_skip")
+    async def promo_create_finish_skip(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await state.update_data(description=None)
+        await state.set_state(PromoCreate.waiting_confirmation)
+        await _send_promo_summary(callback.message, state, edit=True)
+
+    # Подтверждение создания
+    @admin_router.callback_query(PromoCreate.waiting_confirmation, F.data == "admin_promo_confirm_create")
+    async def promo_confirm_create(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer("Создаю…")
+        data = await state.get_data()
+        try:
+            ok = create_promo_code(
+                data['code'],
+                discount_percent=data.get('discount_percent'),
+                discount_amount=data.get('discount_amount'),
+                usage_limit_total=data.get('usage_limit_total'),
+                usage_limit_per_user=data.get('usage_limit_per_user'),
+                valid_from=(datetime.fromisoformat(data['valid_from']) if data.get('valid_from') else None),
+                valid_until=(datetime.fromisoformat(data['valid_until']) if data.get('valid_until') else None),
+                description=data.get('description')
+            )
+        except Exception:
+            ok = False
+        await state.clear()
+        await callback.message.edit_text(
+            ("✅ Промокод создан." if ok else "❌ Не удалось создать промокод."),
+            reply_markup=keyboards.create_admin_promos_menu_keyboard()
+        )
+
+    # Вспомогательное: отправка сводки
+    async def _send_promo_summary(message_or_msg, state: FSMContext, edit: bool = False):
+        data = await state.get_data()
+        code = data.get('code') or '—'
+        if data.get('discount_percent'):
+            disc_txt = f"{float(data['discount_percent']):.0f}%"
+        elif data.get('discount_amount'):
+            disc_txt = f"{float(data['discount_amount']):.2f} RUB"
+        else:
+            disc_txt = '—'
+        lim_total = data.get('usage_limit_total')
+        lim_per = data.get('usage_limit_per_user')
+        limits_txt = []
+        if lim_total:
+            limits_txt.append(f"total={lim_total}")
+        if lim_per:
+            limits_txt.append(f"per_user={lim_per}")
+        limits_txt = ";".join(limits_txt) if limits_txt else '—'
+        def _fmt_date(s):
+            try:
+                return datetime.fromisoformat(s).strftime('%Y-%m-%d')
+            except Exception:
+                return '—'
+        dates_txt = '—'
+        if data.get('valid_from') or data.get('valid_until'):
+            dates_txt = f"{_fmt_date(data.get('valid_from'))} → { _fmt_date(data.get('valid_until')) }"
+        desc = data.get('description') or '—'
+        text = (
+            "🎟 <b>Сводка промокода</b>\n\n"
+            f"<b>Код:</b> {code}\n"
+            f"<b>Скидка:</b> {disc_txt}\n"
+            f"<b>Лимиты:</b> {limits_txt}\n"
+            f"<b>Даты:</b> {dates_txt}\n"
+            f"<b>Описание:</b> {html_escape.escape(desc) if desc != '—' else '—'}\n\n"
+            "Подтвердите создание."
+        )
+        kb = keyboards.create_admin_promo_confirm_keyboard()
+        if edit:
+            try:
+                await message_or_msg.edit_text(text, reply_markup=kb)
+            except Exception:
+                await message_or_msg.answer(text, reply_markup=kb)
+        else:
+            await message_or_msg.answer(text, reply_markup=kb)
 
     # --- Пользователи: список, пагинация, просмотр ---
     @admin_router.callback_query(F.data.startswith("admin_users"))

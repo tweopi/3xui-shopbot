@@ -11,9 +11,16 @@
 
 <div class="card glass mb-3">
   <div class="card-body">
-    <form action="{{ url_for('create_key_ajax_route') }}" method="post" class="row g-2 align-items-end" id="create-key-form" autocomplete="off">
+    <form action="{{ url_for('create_key_standalone_ajax_route') }}" method="post" class="row g-2 align-items-end" id="create-key-form" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <div class="col-12 col-sm-3">
+      <input type="hidden" name="key_type" id="key_type" value="personal" />
+      <div class="col-12">
+        <div class="btn-group" role="group" aria-label="Тип ключа">
+          <button type="button" class="btn btn-outline-primary rounded-3" id="btn-type-personal">Персональный ключ</button>
+          <button type="button" class="btn btn-outline-purple rounded-3" id="btn-type-gift">Подарочный ключ</button>
+        </div>
+      </div>
+      <div class="col-12 col-sm-3" id="group_user">
         <label class="form-label" for="user_id">Пользователь</label>
         <div class="input-group">
           <input class="form-control rounded-3" id="user_id" name="user_id" placeholder="ID или @username" required />
@@ -66,6 +73,10 @@
           <button class="btn btn-outline-secondary rounded-3" type="button" data-preset="180">+180</button>
           <button class="btn btn-outline-secondary rounded-3" type="button" data-preset="365">+365</button>
         </div>
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="comment">Комментарий</label>
+        <input class="form-control rounded-3" type="text" id="comment" name="comment" placeholder="Необязательный комментарий" />
       </div>
       <div class="col-12 col-sm-12">
         <button type="button" class="btn btn-primary rounded-3" id="btn-submit-create">Создать ключ</button>
@@ -161,6 +172,9 @@
 
     const form = document.getElementById('create-key-form');
     const submitBtn = document.getElementById('btn-submit-create');
+    const keyTypeInput = document.getElementById('key_type');
+    const btnTypePersonal = document.getElementById('btn-type-personal');
+    const btnTypeGift = document.getElementById('btn-type-gift');
     if (!form || !submitBtn) return;
 
     // Блокируем Enter, чтобы браузер не сабмитил форму нативно
@@ -169,7 +183,7 @@
     });
 
     // Сохранение полей в localStorage
-    const fields = ['user_id','host_name','key_email','plan_select','custom_days','expiry_date'];
+    const fields = ['user_id','host_name','key_email','plan_select','custom_days','expiry_date','key_type','comment'];
     function saveState(){
       const state = {};
       fields.forEach(id => { const el = document.getElementById(id); if (el) state[id] = el.value; });
@@ -206,6 +220,7 @@
     const daysInput = document.getElementById('custom_days');
     const emailInput = document.getElementById('key_email');
     const userInput = document.getElementById('user_id');
+    const userGroup = document.getElementById('group_user');
 
     // Утилита для ручного обновления контейнера с data-fetch-url (без перезагрузки страницы)
     async function refreshContainerById(id){
@@ -455,6 +470,15 @@
     // Автогенерация email
     async function maybeGenEmail(){
       if (!emailInput || !userInput) return;
+      const type = (keyTypeInput?.value || 'personal');
+      if (type === 'gift') {
+        try {
+          const res = await fetch(`{{ url_for('generate_gift_email_route') }}`);
+          const data = await res.json();
+          if (data && data.ok && data.email) { emailInput.value = data.email; }
+        } catch(_) {}
+        return;
+      }
       const userId = userInput.value && String(userInput.value).trim();
       if (!userId) return;
       try {
@@ -466,9 +490,33 @@
     if (userInput) {
       userInput.addEventListener('blur', async ()=>{ await normalizeUserId(); await maybeGenEmail(); });
       userInput.addEventListener('change', async ()=>{ await normalizeUserId(); await maybeGenEmail(); });
-      // генерация при загрузке
+      // генерация при загрузке для персонального
       (async ()=>{ await normalizeUserId(); await maybeGenEmail(); })();
     }
+
+    function applyKeyTypeUI(){
+      const type = (keyTypeInput?.value || 'personal');
+      if (type === 'gift') {
+        if (userGroup) userGroup.style.display = 'none';
+        try { emailInput.readOnly = true; } catch(_){ }
+        (async ()=>{ try { await maybeGenEmail(); } catch(_){ } })();
+      } else {
+        if (userGroup) userGroup.style.display = '';
+        try { emailInput.readOnly = true; } catch(_){ }
+        (async ()=>{ try { await normalizeUserId(); await maybeGenEmail(); } catch(_){ } })();
+      }
+    }
+
+    if (btnTypePersonal) btnTypePersonal.addEventListener('click', ()=>{
+      if (keyTypeInput) keyTypeInput.value = 'personal';
+      applyKeyTypeUI(); saveState();
+    });
+    if (btnTypeGift) btnTypeGift.addEventListener('click', ()=>{
+      if (keyTypeInput) keyTypeInput.value = 'gift';
+      applyKeyTypeUI(); saveState();
+    });
+
+    applyKeyTypeUI();
 
     // Обработчики для тарифов/дней/пресетов
     if (planSel) {

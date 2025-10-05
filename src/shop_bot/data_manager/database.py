@@ -1,4 +1,4 @@
-﻿import sqlite3
+import sqlite3
 from datetime import datetime
 import logging
 from pathlib import Path
@@ -37,6 +37,7 @@ def initialize_db():
                     referral_start_bonus_received BOOLEAN DEFAULT 0
                 )
             ''')
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS vpn_keys (
                     key_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,22 +46,25 @@ def initialize_db():
                     xui_client_uuid TEXT NOT NULL,
                     key_email TEXT NOT NULL UNIQUE,
                     expiry_date TIMESTAMP,
-                    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    comment TEXT,
+                    is_gift BOOLEAN DEFAULT 0
                 )
             ''')
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS transactions (
-                    username TEXT,
-                    transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    payment_id TEXT UNIQUE NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    amount_rub REAL NOT NULL,
-                    amount_currency REAL,
-                    currency_name TEXT,
-                    payment_method TEXT,
-                    metadata TEXT,
-                    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                CREATE TABLE IF NOT EXISTS promo_codes (
+                    promo_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL UNIQUE,
+                    discount_percent REAL,
+                    discount_amount REAL,
+                    months_bonus INTEGER,
+                    max_uses INTEGER,
+                    used_count INTEGER DEFAULT 0,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    valid_from TIMESTAMP,
+                    valid_to TIMESTAMP,
+                    comment TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
             cursor.execute('''
@@ -237,6 +241,289 @@ def initialize_db():
     except sqlite3.Error as e:
         logging.error(f"Ошибка базы данных при инициализации: {e}")
 
+# --- Promo codes API (unified) ---
+def _promo_columns(conn: sqlite3.Connection) -> set[str]:
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(promo_codes)")
+    return {row[1] for row in cursor.fetchall()}
+
+
+def create_promo_code(
+    code: str,
+    *,
+    discount_percent: float | None = None,
+    discount_amount: float | None = None,
+    usage_limit_total: int | None = None,
+    usage_limit_per_user: int | None = None,
+    valid_from: datetime | None = None,
+    valid_until: datetime | None = None,
+    created_by: int | None = None,  # ignored in 3xui schema
+    description: str | None = None,
+) -> bool:
+    code_s = (code or "").strip().upper()
+    if not code_s:
+        raise ValueError("code is required")
+    if (discount_percent or 0) <= 0 and (discount_amount or 0) <= 0:
+        raise ValueError("discount must be positive")
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cols = _promo_columns(conn)
+            # prefer valid_to in this project; migration didn't add valid_until
+            vf = valid_from.isoformat() if isinstance(valid_from, datetime) else valid_from
+            vu = valid_until.isoformat() if isinstance(valid_until, datetime) else valid_until
+            fields = [
+                ("code", code_s),
+                ("discount_percent", float(discount_percent) if discount_percent is not None else None),
+                ("discount_amount", float(discount_amount) if discount_amount is not None else None),
+                ("usage_limit_total", usage_limit_total),
+                ("usage_limit_per_user", usage_limit_per_user),
+                ("valid_from", vf),
+                ("description", description),
+            ]
+            if "valid_until" in cols:
+                fields.append(("valid_until", vu))
+            else:
+                fields.append(("valid_to", vu))
+            columns = ", ".join([f for f, _ in fields])
+            placeholders = ", ".join(["?" for _ in fields])
+            values = [v for _, v in fields]
+            cursor.execute(
+                f"INSERT INTO promo_codes ({columns}) VALUES ({placeholders})",
+                values,
+            )
+            conn.commit()
+            return True
+    except sqlite3.IntegrityError:
+        return False
+    except sqlite3.Error as e:
+        logging.error(f"create_promo_code failed: {e}")
+        return False
+
+
+def get_promo_code(code: str) -> dict | None:
+    code_s = (code or "").strip().upper()
+    if not code_s:
+        return None
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM promo_codes WHERE code = ?", (code_s,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except sqlite3.Error as e:
+        logging.error(f"get_promo_code failed: {e}")
+        return None
+
+
+def list_promo_codes(include_inactive: bool = True) -> list[dict]:
+    query = "SELECT * FROM promo_codes"
+    if not include_inactive:
+        # use is_active if present, else active
+        query += " WHERE COALESCE(is_active, active, 1) = 1"
+    query += " ORDER BY created_at DESC"
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(query)
+            return [dict(r) for r in cursor.fetchall()]
+    except sqlite3.Error as e:
+        logging.error(f"list_promo_codes failed: {e}")
+        return []
+
+
+def check_promo_code_available(code: str, user_id: int) -> tuple[dict | None, str | None]:
+    code_s = (code or "").strip().upper()
+    if not code_s:
+        return None, "empty_code"
+    user_id_i = int(user_id)
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cols = _promo_columns(conn)
+            used_expr = (
+                "COALESCE(used_total, used_count, 0)" if "used_total" in cols and "used_count" in cols
+                else ("COALESCE(used_total, 0)" if "used_total" in cols
+                      else ("COALESCE(used_count, 0)" if "used_count" in cols else "0"))
+            )
+            vu_expr = "valid_until" if "valid_until" in cols else "valid_to"
+            active_expr = "is_active" if "is_active" in cols else "active"
+            query = f"""
+                SELECT code, discount_percent, discount_amount,
+                       usage_limit_total, usage_limit_per_user,
+                       {used_expr} AS used_total,
+                       valid_from, {vu_expr} AS valid_until,
+                       {active_expr} AS is_active
+                FROM promo_codes
+                WHERE code = ?
+            """
+            cursor.execute(query, (code_s,))
+            row = cursor.fetchone()
+            if row is None:
+                return None, "not_found"
+            promo = dict(row)
+            if not promo.get("is_active"):
+                return None, "inactive"
+            now = datetime.utcnow()
+            vf = promo.get("valid_from")
+            if vf:
+                try:
+                    if datetime.fromisoformat(str(vf)) > now:
+                        return None, "not_started"
+                except Exception:
+                    pass
+            vu = promo.get("valid_until")
+            if vu:
+                try:
+                    if datetime.fromisoformat(str(vu)) < now:
+                        return None, "expired"
+                except Exception:
+                    pass
+            limit_total = promo.get("usage_limit_total")
+            used_total = promo.get("used_total") or 0
+            if limit_total and used_total >= limit_total:
+                return None, "total_limit_reached"
+            per_user = promo.get("usage_limit_per_user")
+            if per_user:
+                cursor.execute(
+                    "SELECT COUNT(1) FROM promo_code_usages WHERE code = ? AND user_id = ?",
+                    (code_s, user_id_i),
+                )
+                count = cursor.fetchone()[0]
+                if count >= per_user:
+                    return None, "user_limit_reached"
+            return promo, None
+    except sqlite3.Error as e:
+        logging.error(f"check_promo_code_available failed: {e}")
+        return None, "db_error"
+
+
+def update_promo_code_status(code: str, *, is_active: bool | None = None) -> bool:
+    code_s = (code or "").strip().upper()
+    if not code_s:
+        return False
+    sets = []
+    params: list = []
+    if is_active is not None:
+        sets.append("is_active = ?")
+        params.append(1 if is_active else 0)
+        # Update legacy column too for compatibility
+        sets.append("active = ?")
+        params.append(1 if is_active else 0)
+    if not sets:
+        return False
+    params.append(code_s)
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE promo_codes SET {', '.join(sets)} WHERE code = ?", params)
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"update_promo_code_status failed: {e}")
+        return False
+
+
+def redeem_promo_code(
+    code: str,
+    user_id: int,
+    *,
+    applied_amount: float,
+    order_id: str | None = None,
+) -> dict | None:
+    code_s = (code or "").strip().upper()
+    if not code_s:
+        return None
+    user_id_i = int(user_id)
+    applied_amount_f = float(applied_amount)
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cols = _promo_columns(conn)
+            used_expr = (
+                "COALESCE(used_total, used_count, 0)" if "used_total" in cols and "used_count" in cols
+                else ("COALESCE(used_total, 0)" if "used_total" in cols
+                      else ("COALESCE(used_count, 0)" if "used_count" in cols else "0"))
+            )
+            vu_expr = "valid_until" if "valid_until" in cols else "valid_to"
+            active_expr = "is_active" if "is_active" in cols else "active"
+            query = f"""
+                SELECT code, discount_percent, discount_amount,
+                       usage_limit_total, usage_limit_per_user,
+                       {used_expr} AS used_total,
+                       valid_from, {vu_expr} AS valid_until,
+                       {active_expr} AS is_active
+                FROM promo_codes
+                WHERE code = ?
+            """
+            cursor.execute(query, (code_s,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            promo = dict(row)
+            if not promo.get("is_active"):
+                return None
+            now = datetime.utcnow()
+            vf = promo.get("valid_from")
+            if vf:
+                try:
+                    if datetime.fromisoformat(str(vf)) > now:
+                        return None
+                except Exception:
+                    pass
+            vu = promo.get("valid_until")
+            if vu:
+                try:
+                    if datetime.fromisoformat(str(vu)) < now:
+                        return None
+                except Exception:
+                    pass
+            limit_total = promo.get("usage_limit_total")
+            used_total = promo.get("used_total") or 0
+            if limit_total and used_total >= limit_total:
+                return None
+            per_user = promo.get("usage_limit_per_user")
+            if per_user:
+                cursor.execute(
+                    "SELECT COUNT(1) FROM promo_code_usages WHERE code = ? AND user_id = ?",
+                    (code_s, user_id_i),
+                )
+                count = cursor.fetchone()[0]
+                if count >= per_user:
+                    return None
+            else:
+                count = None
+            # redeem
+            cursor.execute(
+                """
+                INSERT INTO promo_code_usages (code, user_id, applied_amount, order_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                (code_s, user_id_i, applied_amount_f, order_id),
+            )
+            # increment counters
+            cursor.execute(
+                "UPDATE promo_codes SET used_total = COALESCE(used_total, 0) + 1, used_count = COALESCE(used_count, 0) + 1 WHERE code = ?",
+                (code_s,),
+            )
+            conn.commit()
+            promo["used_total"] = (used_total or 0) + 1
+            promo["redeemed_by"] = user_id_i
+            promo["applied_amount"] = applied_amount_f
+            promo["order_id"] = order_id
+            if per_user:
+                promo["user_usage_count"] = (count or 0) + 1
+            else:
+                promo["user_usage_count"] = None
+            return promo
+    except sqlite3.Error as e:
+        logging.error(f"redeem_promo_code failed: {e}")
+        return None
+
 def run_migration():
     if not DB_FILE.exists():
         logging.error("Файл базы данных users.db не найден. Мигрировать нечего.")
@@ -284,6 +571,15 @@ def run_migration():
             logging.info(" -> Столбец 'referral_start_bonus_received' уже существует.")
         
         logging.info("Таблица 'users' успешно обновлена.")
+
+        # Индексы для ускорения фильтрации/сортировки пользователей
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_reg_date ON users(registration_date)")
+            conn.commit()
+            logging.info(" -> Индексы для 'users' созданы/проверены.")
+        except sqlite3.Error as e:
+            logging.warning(f" -> Не удалось создать индексы для 'users': {e}")
 
         logging.info("Миграция таблицы 'transactions' ...")
 
@@ -422,6 +718,120 @@ def run_migration():
             logging.info("Таблица 'host_speedtests' готова к использованию.")
         except sqlite3.Error as e:
             logging.error(f"Не удалось создать 'host_speedtests': {e}")
+
+        # Create table for host resource metrics (monitor history)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS host_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    host_name TEXT NOT NULL,
+                    cpu_percent REAL,
+                    mem_percent REAL,
+                    mem_used INTEGER,
+                    mem_total INTEGER,
+                    disk_percent REAL,
+                    disk_used INTEGER,
+                    disk_total INTEGER,
+                    load1 REAL,
+                    load5 REAL,
+                    load15 REAL,
+                    uptime_seconds REAL,
+                    ok INTEGER NOT NULL DEFAULT 1,
+                    error TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                '''
+            )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_host_metrics_host_time ON host_metrics(host_name, created_at DESC)")
+            conn.commit()
+            logging.info("Таблица 'host_metrics' готова к использованию.")
+        except sqlite3.Error as e:
+            logging.error(f"Не удалось создать 'host_metrics': {e}")
+
+        # Ensure extra columns for standalone keys and promo table
+        try:
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(vpn_keys)")
+            vk_cols = [row[1] for row in cursor.fetchall()]
+            if 'comment' not in vk_cols:
+                cursor.execute("ALTER TABLE vpn_keys ADD COLUMN comment TEXT")
+                logging.info(" -> Добавлен столбец 'comment' в 'vpn_keys'.")
+            if 'is_gift' not in vk_cols:
+                cursor.execute("ALTER TABLE vpn_keys ADD COLUMN is_gift BOOLEAN DEFAULT 0")
+                logging.info(" -> Добавлен столбец 'is_gift' в 'vpn_keys'.")
+            conn.commit()
+        except sqlite3.Error as e:
+            logging.error(f"Не удалось мигрировать 'vpn_keys': {e}")
+
+        # Ensure promo code tables and columns (new flexible scheme)
+        try:
+            cursor = conn.cursor()
+            # Base table (create if not exists; old columns may exist — we'll extend with new ones)
+            cursor.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS promo_codes (
+                    promo_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL UNIQUE,
+                    discount_percent REAL,
+                    discount_amount REAL,
+                    -- legacy names below may exist in older DBs
+                    months_bonus INTEGER,
+                    max_uses INTEGER,
+                    used_count INTEGER DEFAULT 0,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    valid_from TIMESTAMP,
+                    valid_to TIMESTAMP,
+                    comment TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                '''
+            )
+            # Ensure new columns used by unified promo API
+            try:
+                cursor.execute("PRAGMA table_info(promo_codes)")
+                cols = {row[1] for row in cursor.fetchall()}
+                # New canonical columns
+                if 'usage_limit_total' not in cols:
+                    cursor.execute("ALTER TABLE promo_codes ADD COLUMN usage_limit_total INTEGER")
+                if 'usage_limit_per_user' not in cols:
+                    cursor.execute("ALTER TABLE promo_codes ADD COLUMN usage_limit_per_user INTEGER")
+                if 'used_total' not in cols:
+                    cursor.execute("ALTER TABLE promo_codes ADD COLUMN used_total INTEGER DEFAULT 0")
+                if 'is_active' not in cols:
+                    cursor.execute("ALTER TABLE promo_codes ADD COLUMN is_active INTEGER DEFAULT 1")
+                if 'description' not in cols:
+                    cursor.execute("ALTER TABLE promo_codes ADD COLUMN description TEXT")
+                if 'valid_until' not in cols and 'valid_to' in cols:
+                    # Keep using valid_to for backward compatibility; unified API will read either
+                    pass
+            except Exception as e:
+                logging.warning(f"promo_codes migration (columns) warning: {e}")
+
+            # Mirror legacy counters to new ones if new ones are zero
+            try:
+                # If used_total is null but used_count exists, initialize used_total from used_count
+                cursor.execute("UPDATE promo_codes SET used_total = COALESCE(used_total, 0) + COALESCE(used_count, 0) WHERE used_total IS NULL")
+            except Exception:
+                pass
+
+            # Usages table
+            cursor.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS promo_code_usages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    applied_amount REAL NOT NULL,
+                    order_id TEXT,
+                    used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                '''
+            )
+            conn.commit()
+        except sqlite3.Error as e:
+            logging.error(f"Не удалось подготовить таблицы промокодов: {e}")
 
         conn.close()
         
@@ -1700,6 +2110,64 @@ def get_all_users() -> list[dict]:
         logging.error(f"Failed to get all users: {e}")
         return []
 
+def get_users_paginated(page: int = 1, per_page: int = 20, q: str | None = None) -> tuple[list[dict], int]:
+    """Возвращает страницу пользователей и общее количество под фильтр.
+    Фильтрация: по вхождению в telegram_id (как текст) или username (регистр не важен).
+    Сортировка: по дате регистрации (новые сверху).
+    """
+    try:
+        page = max(1, int(page or 1))
+        per_page = max(1, min(100, int(per_page or 20)))
+    except Exception:
+        page, per_page = 1, 20
+    offset = (page - 1) * per_page
+
+    users: list[dict] = []
+    total = 0
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            if q:
+                q = (q or '').strip()
+                like = f"%{q}%"
+                # total
+                cursor.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM users
+                    WHERE CAST(telegram_id AS TEXT) LIKE ? OR username LIKE ? COLLATE NOCASE
+                    """,
+                    (like, like)
+                )
+                total = cursor.fetchone()[0] or 0
+                # page
+                cursor.execute(
+                    """
+                    SELECT * FROM users
+                    WHERE CAST(telegram_id AS TEXT) LIKE ? OR username LIKE ? COLLATE NOCASE
+                    ORDER BY datetime(registration_date) DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (like, like, per_page, offset)
+                )
+            else:
+                cursor.execute("SELECT COUNT(*) FROM users")
+                total = cursor.fetchone()[0] or 0
+                cursor.execute(
+                    """
+                    SELECT * FROM users
+                    ORDER BY datetime(registration_date) DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (per_page, offset)
+                )
+            users = [dict(r) for r in cursor.fetchall()]
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get paginated users: {e}")
+        return [], 0
+    return users, total
+
 def ban_user(telegram_id: int):
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -1934,3 +2402,87 @@ def get_all_tickets_count() -> int:
     except sqlite3.Error as e:
         logging.error("Failed to get all tickets count: %s", e)
         return 0
+# --- Host metrics helpers ---
+def insert_host_metrics(host_name: str, metrics: dict) -> bool:
+    """Insert a resource metrics row for host_name using dict from resource_monitor.get_host_metrics_via_ssh."""
+    try:
+        host_name_n = normalize_host_name(host_name)
+        m = metrics or {}
+        load = m.get('loadavg') or {}
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO host_metrics (
+                    host_name, cpu_percent, mem_percent, mem_used, mem_total,
+                    disk_percent, disk_used, disk_total, load1, load5, load15,
+                    uptime_seconds, ok, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    host_name_n,
+                    float(m.get('cpu_percent')) if m.get('cpu_percent') is not None else None,
+                    float(m.get('mem_percent')) if m.get('mem_percent') is not None else None,
+                    int(m.get('mem_used')) if m.get('mem_used') is not None else None,
+                    int(m.get('mem_total')) if m.get('mem_total') is not None else None,
+                    float(m.get('disk_percent')) if m.get('disk_percent') is not None else None,
+                    int(m.get('disk_used')) if m.get('disk_used') is not None else None,
+                    int(m.get('disk_total')) if m.get('disk_total') is not None else None,
+                    float(load.get('1m')) if load.get('1m') is not None else None,
+                    float(load.get('5m')) if load.get('5m') is not None else None,
+                    float(load.get('15m')) if load.get('15m') is not None else None,
+                    float(m.get('uptime_seconds')) if m.get('uptime_seconds') is not None else None,
+                    1 if (m.get('ok') in (True, 1, '1')) else 0,
+                    str(m.get('error')) if m.get('error') else None,
+                )
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"insert_host_metrics failed for '{host_name}': {e}")
+        return False
+
+
+def get_host_metrics_recent(host_name: str, limit: int = 60) -> list[dict]:
+    try:
+        host_name_n = normalize_host_name(host_name)
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT host_name, cpu_percent, mem_percent, mem_used, mem_total,
+                       disk_percent, disk_used, disk_total,
+                       load1, load5, load15, uptime_seconds, ok, error, created_at
+                FROM host_metrics
+                WHERE TRIM(host_name) = TRIM(?)
+                ORDER BY datetime(created_at) DESC
+                LIMIT ?
+                ''', (host_name_n, int(limit))
+            )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+    except sqlite3.Error as e:
+        logging.error(f"get_host_metrics_recent failed for '{host_name}': {e}")
+        return []
+
+
+def get_latest_host_metrics(host_name: str) -> dict | None:
+    try:
+        host_name_n = normalize_host_name(host_name)
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT * FROM host_metrics
+                WHERE TRIM(host_name) = TRIM(?)
+                ORDER BY datetime(created_at) DESC
+                LIMIT 1
+                ''', (host_name_n,)
+            )
+            r = cursor.fetchone()
+            return dict(r) if r else None
+    except sqlite3.Error as e:
+        logging.error(f"get_latest_host_metrics failed for '{host_name}': {e}")
+        return None

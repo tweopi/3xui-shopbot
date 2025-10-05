@@ -1,11 +1,13 @@
 import logging
+import hashlib
+import re
 
 from datetime import datetime
 
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from shop_bot.data_manager.database import get_setting
+from shop_bot.data_manager.database import get_setting, normalize_host_name
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,37 @@ main_reply_keyboard = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="🏠 Главное меню")]],
     resize_keyboard=True
 )
+
+
+def encode_host_callback_token(host_name: str) -> str:
+    """Сформировать короткий ASCII-токен для host_name для использования в callback_data."""
+    normalized = normalize_host_name(host_name)
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-")
+    slug = slug[:24]
+    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:8]
+    if slug:
+        return f"{slug}-{digest}"
+    return digest
+
+
+def parse_host_callback_data(data: str) -> tuple[str, str, str] | None:
+    if not data or not data.startswith("select_host:"):
+        return None
+    parts = data.split(":", 3)
+    if len(parts) != 4:
+        return None
+    _, action, extra, token = parts
+    return action, extra or "-", token
+
+
+def find_host_by_callback_token(hosts: list[dict], token: str) -> dict | None:
+    if not token:
+        return None
+    for host in hosts or []:
+        if encode_host_callback_token(host.get('host_name', '')) == token:
+            return host
+    return None
+
 
 def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -52,13 +85,15 @@ def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🌍 Ключи на хосте", callback_data="admin_host_keys")
     builder.button(text="🎁 Выдать ключ", callback_data="admin_gift_key")
     builder.button(text="⚡ Тест скорости", callback_data="admin_speedtest")
+    builder.button(text="📊 Мониторинг", callback_data="admin_monitor")
     builder.button(text="🗄 Бэкап БД", callback_data="admin_backup_db")
     builder.button(text="♻️ Восстановить БД", callback_data="admin_restore_db")
     builder.button(text="👮 Администраторы", callback_data="admin_admins_menu")
+    builder.button(text="🎟 Промокоды", callback_data="admin_promo_menu")
     builder.button(text="📢 Рассылка", callback_data="start_broadcast")
     builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
-    # 4 ряда по 2 кнопки (включая бэкап/восстановление), затем "Назад"
-    builder.adjust(2, 2, 2, 2, 1)
+    # Ряды по 2 кнопки, мониторинг вынесен отдельно; последняя строка — "Назад"
+    builder.adjust(2, 2, 2, 2, 1, 1, 1)
     return builder.as_markup()
 
 def create_admins_menu_keyboard() -> InlineKeyboardMarkup:
@@ -68,6 +103,14 @@ def create_admins_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="📋 Список админов", callback_data="admin_view_admins")
     builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
     builder.adjust(2, 2)
+    return builder.as_markup()
+
+
+def create_admin_monitor_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Обновить", callback_data="admin_monitor_refresh")
+    builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+    builder.adjust(1, 1)
     return builder.as_markup()
 
 def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int = 10) -> InlineKeyboardMarkup:
@@ -152,6 +195,13 @@ def create_admin_delete_key_confirm_keyboard(key_id: int) -> InlineKeyboardMarku
 def create_admin_cancel_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    return builder.as_markup()
+
+def create_admin_promo_code_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🎲 Сгенерировать код", callback_data="admin_promo_gen_code")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(1)
     return builder.as_markup()
 
 def create_broadcast_options_keyboard() -> InlineKeyboardMarkup:
@@ -265,9 +315,19 @@ def create_ticket_actions_keyboard(ticket_id: int, is_open: bool = True) -> Inli
 
 def create_host_selection_keyboard(hosts: list, action: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    base_action = action
+    extra = "-"
+    if action.startswith("switch_"):
+        base_action = "switch"
+        extra = action[len("switch_"):] or "-"
+    elif action in {"trial", "new"}:
+        base_action = action
+    else:
+        base_action = action
+    prefix = f"select_host:{base_action}:{extra}:"
     for host in hosts:
-        callback_data = f"select_host_{action}_{host['host_name']}"
-        builder.button(text=host['host_name'], callback_data=callback_data)
+        token = encode_host_callback_token(host['host_name'])
+        builder.button(text=host['host_name'], callback_data=f"{prefix}{token}")
     builder.button(text=(get_setting("btn_back_to_menu") or "⬅️ Назад в меню"), callback_data="manage_keys" if action == 'new' else "back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -296,8 +356,15 @@ def create_payment_method_keyboard(
     show_balance: bool | None = None,
     main_balance: float | None = None,
     price: float | None = None,
+    has_promo_applied: bool | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+
+    # Промокод: ввести/убрать
+    if has_promo_applied:
+        builder.button(text="❌ Убрать промокод", callback_data="remove_promo_code")
+    else:
+        builder.button(text="🎟️ Ввести промокод", callback_data="enter_promo_code")
 
     # Кнопки оплаты с балансов (если разрешено/достаточно средств)
     if show_balance:
@@ -330,6 +397,119 @@ def create_payment_method_keyboard(
 
     builder.button(text=(get_setting("btn_back") or "⬅️ Назад"), callback_data="back_to_email_prompt")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def create_admin_promos_menu_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Создать промокод", callback_data="admin_promo_create")
+    builder.button(text="📋 Список промокодов", callback_data="admin_promo_list")
+    builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_admin_promo_discount_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    # Первый шаг: выбрать тип скидки
+    builder.button(text="Процент", callback_data="admin_promo_discount_type_percent")
+    builder.button(text="Фикс (RUB)", callback_data="admin_promo_discount_type_amount")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+def create_admin_promo_discount_percent_menu_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    # Пресеты процентов
+    for p in (5, 10, 15, 20, 25, 30):
+        builder.button(text=f"{p}%", callback_data=f"admin_promo_discount_percent_{p}")
+    # Ручной ввод обоих типов и переключение меню
+    builder.button(text="🖊 Ввести процент", callback_data="admin_promo_discount_manual_percent")
+    builder.button(text="🖊 Ввести фикс RUB", callback_data="admin_promo_discount_manual_amount")
+    builder.button(text="↔️ Фикс-меню", callback_data="admin_promo_discount_show_amount_menu")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(3, 3, 1, 1, 1)
+    return builder.as_markup()
+
+def create_admin_promo_discount_amount_menu_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    # Пресеты сумм в рублях
+    for a in (50, 100, 150, 200, 300, 500):
+        builder.button(text=f"{a} RUB", callback_data=f"admin_promo_discount_amount_{a}")
+    builder.button(text="🖊 Ввести фикс RUB", callback_data="admin_promo_discount_manual_amount")
+    builder.button(text="🖊 Ввести процент", callback_data="admin_promo_discount_manual_percent")
+    builder.button(text="↔️ Процент-меню", callback_data="admin_promo_discount_show_percent_menu")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(3, 3, 1, 1, 1)
+    return builder.as_markup()
+
+def create_admin_promo_limits_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    # СТАРАЯ клавиатура оставлена для совместимости, но не используется в новом мастере
+    builder.button(text="Пропустить", callback_data="admin_promo_limits_skip")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(1, 1)
+    return builder.as_markup()
+
+def create_admin_promo_limits_type_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Общий лимит", callback_data="admin_promo_limits_type_total")
+    builder.button(text="Лимит на пользователя", callback_data="admin_promo_limits_type_per")
+    builder.button(text="Оба лимита", callback_data="admin_promo_limits_type_both")
+    builder.button(text="Пропустить", callback_data="admin_promo_limits_skip")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(2, 1, 1, 1)
+    return builder.as_markup()
+
+def create_admin_promo_limits_total_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for n in (10, 50, 100, 200, 500, 1000):
+        builder.button(text=str(n), callback_data=f"admin_promo_limits_total_preset_{n}")
+    builder.button(text="🖊 Ввести значение", callback_data="admin_promo_limits_total_manual")
+    builder.button(text="⬅️ Назад", callback_data="admin_promo_limits_back_to_type")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(3, 3, 1, 1)
+    return builder.as_markup()
+
+def create_admin_promo_limits_per_user_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for n in (1, 2, 3, 5, 10):
+        builder.button(text=str(n), callback_data=f"admin_promo_limits_per_preset_{n}")
+    builder.button(text="🖊 Ввести значение", callback_data="admin_promo_limits_per_manual")
+    builder.button(text="⬅️ Назад", callback_data="admin_promo_limits_back_to_type")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(3, 2, 1, 1)
+    return builder.as_markup()
+
+def create_admin_promo_dates_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    # Быстрые пресеты по дням
+    builder.button(text="3 дня", callback_data="admin_promo_dates_days_3")
+    builder.button(text="7 дней", callback_data="admin_promo_dates_days_7")
+    builder.button(text="14 дней", callback_data="admin_promo_dates_days_14")
+    builder.button(text="30 дней", callback_data="admin_promo_dates_days_30")
+    builder.button(text="90 дней", callback_data="admin_promo_dates_days_90")
+    # Альтернативы по периодам
+    builder.button(text="Неделя", callback_data="admin_promo_dates_week")
+    builder.button(text="Месяц", callback_data="admin_promo_dates_month")
+    # Ручной ввод количества дней и пропуск
+    builder.button(text="🖊 Ввести число дней", callback_data="admin_promo_dates_custom_days")
+    builder.button(text="Пропустить", callback_data="admin_promo_dates_skip")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(2, 2, 1, 2, 1)
+    return builder.as_markup()
+
+def create_admin_promo_description_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Пропустить", callback_data="admin_promo_desc_skip")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_admin_promo_confirm_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Создать", callback_data="admin_promo_confirm_create")
+    builder.button(text="❌ Отмена", callback_data="admin_cancel")
+    builder.adjust(2)
     return builder.as_markup()
 
 def create_ton_connect_keyboard(connect_url: str) -> InlineKeyboardMarkup:

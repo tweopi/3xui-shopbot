@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru" data-bs-theme="dark">
 	<head>
 		<meta charset="UTF-8" />
@@ -38,40 +38,23 @@
 					<button type="button" id="brand-edit" class="btn btn-outline-secondary btn-sm btn-glass" title="Сменить название">✏️</button>
 				</div>
 				<nav class="navigation justify-content-center">
-					<a
-						href="{{ url_for('dashboard_page') }}"
-						class="nav-link {% if request.endpoint == 'dashboard_page' %}active{% endif %}"
-						>Главная</a
-					>
-					<a
-						href="{{ url_for('users_page') }}"
-						class="nav-link {% if request.endpoint == 'users_page' %}active{% endif %}"
-						>Пользователи</a>
-					<a
-						href="{{ url_for('admin_keys_page') }}"
-						class="nav-link {% if request.endpoint == 'admin_keys_page' %}active{% endif %}"
-						>Ключи</a>
-					<a
-                        href="{{ url_for('support_list_page') }}"
-                        class="nav-link {% if request.endpoint in ['support_list_page', 'support_ticket_page'] %}active{% endif %}"
-                    >
-                        Поддержка
-                        <span class="open-tickets-badge"
-                              data-fetch-url="{{ url_for('support_open_count_partial') }}"
-                              data-fetch-interval="10000">
-                            {% if open_tickets_count and open_tickets_count > 0 %}
-                            <span class="badge bg-green-lt" title="Открытые тикеты">
-                                <span class="status-dot status-dot-animated bg-green"></span>{{ open_tickets_count }}
-                            </span>
-                            {% endif %}
-                        </span>
-                    </a>
-					<a
-						href="{{ url_for('settings_page') }}"
-						class="nav-link {% if request.endpoint == 'settings_page' %}active{% endif %}"
-						>Настройки</a>
+					<a href="{{ url_for('dashboard_page') }}" class="nav-link {% if request.endpoint == 'dashboard_page' %}active{% endif %}">Главная</a>
+					<a href="{{ url_for('users_page') }}" class="nav-link {% if request.endpoint == 'users_page' %}active{% endif %}">Пользователи</a>
+					<a href="{{ url_for('admin_keys_page') }}" class="nav-link {% if request.endpoint == 'admin_keys_page' %}active{% endif %}">Ключи</a>
+					<a href="{{ url_for('support_list_page') }}" class="nav-link {% if request.endpoint in ['support_list_page', 'support_ticket_page'] %}active{% endif %}">
+						Поддержка
+						<span class="open-tickets-badge" data-fetch-url="{{ url_for('support_open_count_partial') }}" data-fetch-interval="10000">
+							{% if open_tickets_count and open_tickets_count > 0 %}
+							<span class="badge bg-green-lt" title="Открытые тикеты">
+								<span class="status-dot status-dot-animated bg-green"></span>{{ open_tickets_count }}
+							</span>
+							{% endif %}
+						</span>
+					</a>
+					<a href="{{ url_for('monitor_page') }}" class="nav-link {% if request.endpoint == 'monitor_page' %}active{% endif %}">Монитор</a>
+					<a href="{{ url_for('settings_page') }}" class="nav-link {% if request.endpoint == 'settings_page' %}active{% endif %}">Настройки</a>
 				</nav>
-                <div class="bm float-end">
+				<div class="bm float-end">
 					<input id="burger" type="checkbox" />
 					<label for="burger" class="burger_img"></label>
 					<nav class="burger-menu">
@@ -80,6 +63,7 @@
 							<li><a href="{{ url_for('users_page') }}">Пользователи</a></li>
 							<li><a href="{{ url_for('admin_keys_page') }}">Ключи</a></li>
 							<li><a href="{{ url_for('support_list_page') }}">Поддержка</a></li>
+							<li><a href="{{ url_for('monitor_page') }}">Монитор</a></li>
 							<li><a href="{{ url_for('settings_page') }}">Настройки</a></li>
 						</ul>
 					</nav>
@@ -110,11 +94,7 @@
 
 					<div class="user-session-controls">
 						<span>Вы вошли в систему.</span>
-						<form
-							action="{{ url_for('logout_page') }}"
-							method="post"
-							style="display: inline"
-						>
+						<form action="{{ url_for('logout_page') }}" method="post" style="display: inline">
 							<button type="submit" class="btn btn-outline-secondary">Выйти</button>
 						</form>
 						<button type="button" id="theme-toggle" class="btn btn-outline-primary ms-2" title="Переключить тему">

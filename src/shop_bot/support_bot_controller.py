@@ -8,6 +8,7 @@ from aiogram.enums import ParseMode
 from shop_bot.data_manager import database
 from shop_bot.data_manager.database import get_admin_ids
 from shop_bot.support_bot.handlers import get_support_router
+from shop_bot.bot.middlewares import BanMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,10 @@ class SupportBotController:
         try:
             self._bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
             self._dp = Dispatcher()
+
+            # Подключаем BanMiddleware, чтобы заблокированные пользователи не писали в поддержку
+            self._dp.message.middleware(BanMiddleware())
+            self._dp.callback_query.middleware(BanMiddleware())
             
             router = get_support_router()
             self._dp.include_router(router)

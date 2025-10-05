@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import logging
 
 from datetime import datetime, timedelta
@@ -10,6 +10,7 @@ from shop_bot.bot_controller import BotController
 from shop_bot.data_manager import database
 from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager import backup_manager
+from shop_bot.data_manager import resource_monitor
 
 from shop_bot.modules import xui_api
 from shop_bot.bot import keyboards
@@ -24,6 +25,10 @@ logger = logging.getLogger(__name__)
 SPEEDTEST_INTERVAL_SECONDS = 8 * 3600
 _last_speedtests_run_at: datetime | None = None
 _last_backup_run_at: datetime | None = None
+
+# Сбор метрик ресурсов (каждые 5 минут)
+METRICS_INTERVAL_SECONDS = 5 * 60
+_last_metrics_run_at: datetime | None = None
 
 def format_time_left(hours: int) -> str:
     if hours >= 24:
@@ -263,6 +268,7 @@ async def periodic_subscription_check(bot_controller: BotController):
 
             # Периодические измерения скорости по всем хостам (оба варианта: SSH и сетевой)
             await _maybe_run_periodic_speedtests()
+            await _maybe_collect_host_metrics()
 
             # Ежедневный автобэкап БД с отправкой админам
             bot = bot_controller.get_bot_instance() if bot_controller.get_status().get("is_running") else None
@@ -354,3 +360,32 @@ async def _maybe_run_daily_backup(bot: Bot):
         _last_backup_run_at = now
     except Exception as e:
         logger.error(f"Scheduler: Критическая ошибка при создании и отправке бэкапа: {e}", exc_info=True)
+async def _maybe_collect_host_metrics():
+    global _last_metrics_run_at
+    now = datetime.now()
+    if _last_metrics_run_at and (now - _last_metrics_run_at).total_seconds() < METRICS_INTERVAL_SECONDS:
+        return
+    hosts = database.get_all_hosts()
+    if not hosts:
+        _last_metrics_run_at = now
+        return
+    for h in hosts:
+        host_name = h.get('host_name')
+        if not host_name:
+            continue
+        if not (h.get('ssh_host') and h.get('ssh_user')):
+            continue
+        try:
+            try:
+                m = await asyncio.wait_for(asyncio.to_thread(resource_monitor.get_host_metrics_via_ssh, h), timeout=30)
+            except AttributeError:
+                m = await asyncio.wait_for(asyncio.to_thread(resource_monitor.get_host_metrics_via_ssh, h), timeout=30)
+            try:
+                database.insert_host_metrics(host_name, m)
+            except Exception as e:
+                logger.warning(f"Scheduler: insert_host_metrics failed for {host_name}: {e}")
+        except asyncio.TimeoutError:
+            logger.warning(f"Scheduler: Таймаут сбора метрик для хоста '{host_name}'")
+        except Exception as e:
+            logger.error(f"Scheduler: Ошибка сбора метрик для '{host_name}': {e}")
+    _last_metrics_run_at = now

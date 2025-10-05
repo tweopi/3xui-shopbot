@@ -1,4 +1,4 @@
-﻿import os
+import os
 import logging
 import asyncio
 import json
@@ -27,6 +27,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from shop_bot.support_bot_controller import SupportBotController
 from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager import backup_manager
+from shop_bot.data_manager import resource_monitor
+from shop_bot.data_manager import database
 from shop_bot.data_manager.database import (
     get_all_settings, update_setting, get_all_hosts, get_plans_for_host,
     create_host, delete_host, create_plan, delete_plan, update_plan, get_user_count,
@@ -39,8 +41,8 @@ from shop_bot.data_manager.database import (
     update_host_url, update_host_name, update_host_ssh_settings, get_latest_speedtest, get_speedtests,
     get_all_keys, get_keys_for_user, get_key_by_id, delete_key_by_id, update_key_comment, update_key_info,
     add_new_key, get_balance, adjust_user_balance, get_referrals_for_user,
-    get_user, get_key_by_email
-)
+    get_user, get_key_by_email, get_host)
+
 
 _bot_controller = None
 _support_bot_controller = SupportBotController()
@@ -189,6 +191,18 @@ def create_webhook_app(bot_controller_instance):
             return jsonify({"ok": True, "title": title})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
+    @flask_app.route('/monitor/host/<host_name>/metrics.json')
+    @login_required
+    def monitor_host_metrics_json(host_name: str):
+        try:
+            limit = int(request.args.get('limit', '60'))
+        except Exception:
+            limit = 60
+        try:
+            items = database.get_host_metrics_recent(host_name, limit=limit)
+            return jsonify({"ok": True, "items": items})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
 
     @flask_app.route('/')
     @login_required
@@ -270,6 +284,42 @@ def create_webhook_app(bot_controller_instance):
     def dashboard_charts_json():
         data = get_daily_stats_for_charts(days=30)
         return jsonify(data)
+    # --- Resource Monitor ---
+    @flask_app.route('/monitor')
+    @login_required
+    def monitor_page():
+        common_data = get_common_template_data()
+        return render_template('monitor.html', **common_data)
+
+    @flask_app.route('/monitor/local.json')
+    @login_required
+    def monitor_local_json():
+        try:
+            data = resource_monitor.get_local_metrics()
+            return jsonify(data)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @flask_app.route('/monitor/hosts.json')
+    @login_required
+    def monitor_hosts_json():
+        try:
+            data = resource_monitor.collect_hosts_metrics()
+            return jsonify(data)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @flask_app.route('/monitor/host/<host_name>.json')
+    @login_required
+    def monitor_host_json(host_name: str):
+        try:
+            host = get_host(host_name)
+            if not host:
+                return jsonify({"ok": False, "error": "host not found"}), 404
+            data = resource_monitor.get_host_metrics_via_ssh(host)
+            return jsonify(data)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
 
     # --- Support partials ---
     @flask_app.route('/support/table.partial')
@@ -302,7 +352,15 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/users')
     @login_required
     def users_page():
-        users = get_all_users()
+        # Параметры пагинации и поиска
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        q = (request.args.get('q') or '').strip()
+
+        # Получаем ограниченный набор пользователей с серверной фильтрацией
+        from shop_bot.data_manager.database import get_users_paginated
+        users, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
+
         for user in users:
             uid = user['telegram_id']
             user['user_keys'] = get_user_keys(uid)
@@ -312,15 +370,29 @@ def create_webhook_app(bot_controller_instance):
             except Exception:
                 user['balance'] = 0.0
                 user['referrals'] = []
-        
+
+        total_pages = max(1, ceil(total / per_page)) if total else 1
         common_data = get_common_template_data()
-        return render_template('users.html', users=users, **common_data)
+        return render_template(
+            'users.html',
+            users=users,
+            current_page=page,
+            total_pages=total_pages,
+            total_users=total,
+            per_page=per_page,
+            q=q,
+            **common_data
+        )
 
     # Partial: users table tbody
     @flask_app.route('/users/table.partial')
     @login_required
     def users_table_partial():
-        users = get_all_users()
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        q = (request.args.get('q') or '').strip()
+        from shop_bot.data_manager.database import get_users_paginated
+        users, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
         for user in users:
             uid = user['telegram_id']
             user['user_keys'] = get_user_keys(uid)
@@ -545,6 +617,101 @@ def create_webhook_app(bot_controller_instance):
             "connection": result.get('connection_string')
         })
 
+    
+
+    @flask_app.route('/admin/keys/generate-gift-email')
+    @login_required
+    def generate_gift_email_route():
+        """Сгенерировать уникальный email для подарочного ключа (без привязки к Telegram)."""
+        try:
+            for _ in range(12):
+                candidate_email = f"gift-{int(time.time())}-{secrets.token_hex(2)}@bot.local"
+                if not get_key_by_email(candidate_email):
+                    return jsonify({"ok": True, "email": candidate_email})
+            return jsonify({"ok": False, "error": "no_unique_email"}), 500
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @flask_app.route('/admin/keys/create-standalone-ajax', methods=['POST'])
+    @login_required
+    def create_key_standalone_ajax_route():
+        """Создать ключ из панели: персональный (с user_id) или подарочный (user_id=0)."""
+        key_type = (request.form.get('key_type') or 'personal').strip()
+        try:
+            if key_type == 'gift':
+                user_id = 0
+            else:
+                user_id = int(request.form.get('user_id'))
+            host_name = (request.form.get('host_name') or '').strip()
+            xui_uuid = (request.form.get('xui_client_uuid') or '').strip()
+            key_email = (request.form.get('key_email') or '').strip()
+            expiry = request.form.get('expiry_date') or ''
+            comment = (request.form.get('comment') or '').strip()
+            from datetime import datetime as _dt
+            expiry_ms = int(_dt.fromisoformat(expiry).timestamp() * 1000) if expiry else 0
+        except Exception as e:
+            print(f"Ошибка ввода: {e}")
+            raise SystemExit(1)
+
+        if key_type == 'gift' and not key_email:
+            try:
+                for _ in range(12):
+                    candidate_email = f"gift-{int(time.time())}-{secrets.token_hex(2)}@bot.local"
+                    if not get_key_by_email(candidate_email):
+                        key_email = candidate_email
+                        break
+            except Exception:
+                pass
+
+        if not xui_uuid:
+            xui_uuid = str(uuid.uuid4())
+
+        try:
+            result = asyncio.run(xui_api.create_or_update_key_on_host(host_name, key_email, expiry_timestamp_ms=expiry_ms or None))
+        except Exception as e:
+            result = None
+            logger.error(f"create_key_standalone_ajax_route: ошибка панели/хоста: {e}")
+        if not result:
+            print("Ошибка: хост не вернул клиента")
+            raise SystemExit(1)
+
+        new_id = add_new_key(user_id, host_name, result.get('client_uuid') or xui_uuid, key_email, result.get('expiry_timestamp_ms') or expiry_ms or 0)
+        if comment and new_id:
+            try:
+                update_key_comment(int(new_id), comment)
+            except Exception:
+                pass
+
+        if key_type != 'gift' and user_id:
+            try:
+                bot = _bot_controller.get_bot_instance()
+                if bot and new_id:
+                    text = (
+                        '🔐 Ваш ключ готов!\n'
+                        f'Сервер: {host_name}\n'
+                        'Выдан администратором через панель.\n'
+                    )
+                    if result and result.get('connection_string'):
+                        cs = html_escape.escape(result['connection_string'])
+                        text += f"\nПодключение:\n<pre><code>{cs}</code></pre>"
+                    loop = current_app.config.get('EVENT_LOOP')
+                    if loop and loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            bot.send_message(chat_id=user_id, text=text, parse_mode='HTML', disable_web_page_preview=True),
+                            loop
+                        )
+                    else:
+                        asyncio.run(bot.send_message(chat_id=user_id, text=text, parse_mode='HTML', disable_web_page_preview=True))
+            except Exception as notify_err:
+                logger.warning(f"Не удалось уведомить пользователя (standalone ajax): {notify_err}")
+
+        return jsonify({
+            "ok": True,
+            "key_id": new_id,
+            "uuid": result.get('client_uuid'),
+            "expiry_ms": result.get('expiry_timestamp_ms'),
+            "connection": result.get('connection_string')
+        })
     @flask_app.route('/admin/keys/generate-email')
     @login_required
     def generate_key_email_route():
@@ -1515,7 +1682,9 @@ def create_webhook_app(bot_controller_instance):
                     "host_name": parts[5],
                     "plan_id": parts[6],
                     "customer_email": parts[7] if parts[7] != 'None' else None,
-                    "payment_method": parts[8]
+                    "payment_method": parts[8],
+                    # Дополнительное поле promo_code поддерживается, если присутствует 10‑й элемент
+                    "promo_code": (parts[9] if len(parts) > 9 and parts[9] else None),
                 }
                 
                 bot = _bot_controller.get_bot_instance()
@@ -1718,3 +1887,5 @@ def create_webhook_app(bot_controller_instance):
             flash('YooMoney: не удалось проверить operation-history.', 'warning')
         return redirect(url_for('settings_page', tab='payments'))
     return flask_app
+
+

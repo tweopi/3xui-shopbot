@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import os
 import uuid
 import qrcode
@@ -49,6 +49,10 @@ from shop_bot.data_manager.database import (
     is_admin,
     set_referral_start_bonus_received,
     find_and_complete_pending_transaction,
+    check_promo_code_available,
+    redeem_promo_code,
+    update_promo_code_status,
+    get_admin_ids,
 )
 from shop_bot.config import (
     CHOOSE_PLAN_MESSAGE,
@@ -78,6 +82,7 @@ class Onboarding(StatesGroup):
 class PaymentProcess(StatesGroup):
     waiting_for_email = State()
     waiting_for_payment_method = State()
+    waiting_for_promo_code = State()
 
  
 class TopUpProcess(StatesGroup):
@@ -1001,12 +1006,50 @@ def get_user_router() -> Router:
                 reply_markup=keyboards.create_host_selection_keyboard(hosts, action="trial")
             )
 
-    @user_router.callback_query(F.data.startswith("select_host_trial_"))
+    @user_router.callback_query(F.data.startswith("select_host:"))
     @registration_required
-    async def trial_host_selection_handler(callback: types.CallbackQuery):
-        await callback.answer()
-        host_name = callback.data[len("select_host_trial_"):]
-        await process_trial_key_creation(callback.message, host_name)
+    async def select_host_callback_handler(callback: types.CallbackQuery):
+        parsed = keyboards.parse_host_callback_data(callback.data)
+        if not parsed:
+            await callback.answer("Некорректные данные выбора сервера.", show_alert=True)
+            return
+
+        action, extra, token = parsed
+        hosts = get_all_hosts()
+        host_entry = keyboards.find_host_by_callback_token(hosts, token)
+        if not host_entry:
+            await callback.answer("Сервер не найден.", show_alert=True)
+            return
+
+        host_name = host_entry.get('host_name')
+
+        if action == "trial":
+            await callback.answer()
+            await process_trial_key_creation(callback.message, host_name)
+            return
+
+        if action == "new":
+            await callback.answer()
+            plans = get_plans_for_host(host_name)
+            if not plans:
+                await callback.message.edit_text(f"❌ Для сервера \"{host_name}\" не настроены тарифы.")
+                return
+            await callback.message.edit_text(
+                CHOOSE_PLAN_MESSAGE or "Выберите тариф:",
+                reply_markup=keyboards.create_plans_keyboard(plans, action="new", host_name=host_name)
+            )
+            return
+
+        if action == "switch":
+            try:
+                key_id = int(extra)
+            except Exception:
+                await callback.answer("Некорректные данные выбора сервера.", show_alert=True)
+                return
+            await handle_switch_host(callback, key_id, host_name)
+            return
+
+        await callback.answer("Неизвестное действие.", show_alert=True)
 
     async def process_trial_key_creation(message: types.Message, host_name: str):
         user_id = message.chat.id
@@ -1133,22 +1176,7 @@ def get_user_router() -> Router:
             reply_markup=keyboards.create_host_selection_keyboard(hosts, action=f"switch_{key_id}")
         )
 
-    @user_router.callback_query(F.data.startswith("select_host_switch_"))
-    @registration_required
-    async def select_host_for_switch(callback: types.CallbackQuery):
-        await callback.answer()
-        payload = callback.data[len("select_host_switch_"):]
-        parts = payload.split("_", 1)
-        if len(parts) != 2:
-            await callback.answer("Некорректные данные выбора сервера.", show_alert=True)
-            return
-        try:
-            key_id = int(parts[0])
-        except ValueError:
-            await callback.answer("Некорректный идентификатор ключа.", show_alert=True)
-            return
-        new_host_name = parts[1]
-
+    async def _switch_key_to_host(callback: types.CallbackQuery, key_id: int, new_host_name: str):
         key_data = get_key_by_id(key_id)
 
         if not key_data or key_data.get('user_id') != callback.from_user.id:
@@ -1159,26 +1187,29 @@ def get_user_router() -> Router:
         if not old_host:
             await callback.answer("Для ключа не указан текущий сервер.", show_alert=True)
             return
+
         if new_host_name == old_host:
             await callback.answer("Это уже текущий сервер.", show_alert=True)
             return
 
-        # Точное сохранение срока действия при переносе (без увеличения времени)
         try:
             expiry_dt = datetime.fromisoformat(key_data['expiry_date'])
             expiry_timestamp_ms_exact = int(expiry_dt.timestamp() * 1000)
         except Exception:
-            # Fallback: хотя бы 1 день, если дата в БД повреждена
             now_dt = datetime.now()
             expiry_timestamp_ms_exact = int((now_dt + timedelta(days=1)).timestamp() * 1000)
 
+        email = key_data.get('key_email')
+        if not email:
+            await callback.answer("Не удалось определить email ключа. Обратитесь в поддержку.", show_alert=True)
+            return
+
+        await callback.answer()
         await callback.message.edit_text(
             f"⏳ Переношу ключ на сервер \"{new_host_name}\"..."
         )
 
-        email = key_data.get('key_email')
         try:
-            # Передаём точный expiry_timestamp_ms, чтобы не увеличивать срок на панели при переносе
             result = await xui_api.create_or_update_key_on_host(
                 new_host_name,
                 email,
@@ -1191,13 +1222,11 @@ def get_user_router() -> Router:
                 )
                 return
 
-            # Сначала удаляем на старом сервере, пока локально сохранен старый UUID по email
             try:
                 await xui_api.delete_client_on_host(old_host, email)
             except Exception:
                 pass
 
-            # Затем обновляем локальную БД новым хостом и UUID
             update_key_host_and_info(
                 key_id=key_id,
                 new_host_name=new_host_name,
@@ -1205,7 +1234,6 @@ def get_user_router() -> Router:
                 new_expiry_ms=result['expiry_timestamp_ms']
             )
 
-            # Показываем сразу обновлённые данные ключа
             try:
                 updated_key = get_key_by_id(key_id)
                 details = await xui_api.get_key_details_from_host(updated_key)
@@ -1221,7 +1249,6 @@ def get_user_router() -> Router:
                         reply_markup=keyboards.create_key_info_keyboard(key_id)
                     )
                 else:
-                    # Fallback: показать сообщение об успехе
                     await callback.message.edit_text(
                         f"✅ Готово! Ключ перенесён на сервер \"{new_host_name}\".\n"
                         "Обновите подписку/конфиг в клиенте, если требуется.",
@@ -1238,6 +1265,25 @@ def get_user_router() -> Router:
             await callback.message.edit_text(
                 "❌ Произошла ошибка при переносе ключа. Попробуйте позже."
             )
+
+    @user_router.callback_query(F.data.startswith("select_host_switch_"))
+    @registration_required
+    async def select_host_for_switch(callback: types.CallbackQuery):
+        payload = callback.data[len("select_host_switch_"):]
+        parts = payload.split("_", 1)
+        if len(parts) != 2:
+            await callback.answer("Некорректные данные выбора сервера.", show_alert=True)
+            return
+        try:
+            key_id = int(parts[0])
+        except ValueError:
+            await callback.answer("Некорректный идентификатор ключа.", show_alert=True)
+            return
+        new_host_name = parts[1]
+        await _switch_key_to_host(callback, key_id, new_host_name)
+
+    async def handle_switch_host(callback: types.CallbackQuery, key_id: int, new_host_name: str):
+        await _switch_key_to_host(callback, key_id, new_host_name)
 
     @user_router.callback_query(F.data.startswith("show_qr_"))
     @registration_required
@@ -1406,20 +1452,6 @@ def get_user_router() -> Router:
             reply_markup=keyboards.create_host_selection_keyboard(hosts, action="new")
         )
 
-    @user_router.callback_query(F.data.startswith("select_host_new_"))
-    @registration_required
-    async def select_host_for_purchase_handler(callback: types.CallbackQuery):
-        await callback.answer()
-        host_name = callback.data[len("select_host_new_"):]
-        plans = get_plans_for_host(host_name)
-        if not plans:
-            await callback.message.edit_text(f"❌ Для сервера \"{host_name}\" не настроены тарифы.")
-            return
-        await callback.message.edit_text(
-            "Выберите тариф для нового ключа:", 
-            reply_markup=keyboards.create_plans_keyboard(plans, action="new", host_name=host_name)
-        )
-
     @user_router.callback_query(F.data.startswith("extend_key_"))
     @registration_required
     async def extend_key_handler(callback: types.CallbackQuery):
@@ -1579,7 +1611,6 @@ def get_user_router() -> Router:
         
         price = Decimal(str(plan['price']))
         final_price = price
-        discount_applied = False
         message_text = CHOOSE_PAYMENT_METHOD_MESSAGE
 
         if user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
@@ -1595,6 +1626,40 @@ def get_user_router() -> Router:
                     f"Старая цена: <s>{price:.2f} RUB</s>\n"
                     f"<b>Новая цена: {final_price:.2f} RUB</b>\n\n"
                 ) + CHOOSE_PAYMENT_METHOD_MESSAGE
+
+        # Промокод (если уже применён)
+        promo_percent = data.get('promo_discount_percent')
+        promo_amount = data.get('promo_discount_amount')
+        promo_code = (data.get('promo_code') or '').strip()
+        if promo_code:
+            try:
+                if promo_percent:
+                    perc = Decimal(str(promo_percent))
+                    if perc > 0:
+                        discount_amount = (final_price * perc / 100).quantize(Decimal("0.01"))
+                        final_price = (final_price - discount_amount).quantize(Decimal("0.01"))
+                elif promo_amount:
+                    amt = Decimal(str(promo_amount))
+                    if amt > 0:
+                        final_price = (final_price - amt).quantize(Decimal("0.01"))
+                if final_price < Decimal('0'):
+                    final_price = Decimal('0.00')
+                # Добавим описание скидки промокода
+                promo_line = f"Промокод {promo_code}: "
+                if promo_percent:
+                    promo_line += f"скидка {Decimal(str(promo_percent)):.0f}%\n"
+                elif promo_amount:
+                    promo_line += f"скидка {Decimal(str(promo_amount)):.2f} RUB\n"
+                else:
+                    promo_line += "применён\n"
+                message_text = (
+                    (f"{promo_line}"
+                     f"Старая цена: <s>{price:.2f} RUB</s>\n"
+                     f"<b>Новая цена: {final_price:.2f} RUB</b>\n\n")
+                    + message_text
+                )
+            except Exception:
+                pass
 
         await state.update_data(final_price=float(final_price))
 
@@ -1615,7 +1680,8 @@ def get_user_router() -> Router:
                     key_id=data.get('key_id'),
                     show_balance=show_balance_btn,
                     main_balance=main_balance,
-                    price=float(final_price)
+                    price=float(final_price),
+                    has_promo_applied=bool(promo_code)
                 )
             )
         except TelegramBadRequest:
@@ -1627,7 +1693,8 @@ def get_user_router() -> Router:
                     key_id=data.get('key_id'),
                     show_balance=show_balance_btn,
                     main_balance=main_balance,
-                    price=float(final_price)
+                    price=float(final_price),
+                    has_promo_applied=bool(promo_code)
                 )
             )
         await state.set_state(PaymentProcess.waiting_for_payment_method)
@@ -1640,6 +1707,61 @@ def get_user_router() -> Router:
             reply_markup=keyboards.create_skip_email_keyboard()
         )
         await state.set_state(PaymentProcess.waiting_for_email)
+
+    # --- Промокод: запрос ввода ---
+    @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "enter_promo_code")
+    async def prompt_enter_promo(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer()
+        await state.set_state(PaymentProcess.waiting_for_promo_code)
+        await callback.message.edit_text(
+            "🎟️ Введите промокод текстом:"
+        )
+
+    # --- Промокод: обработка ввода ---
+    @user_router.message(PaymentProcess.waiting_for_promo_code)
+    async def handle_promo_input(message: types.Message, state: FSMContext):
+        code = (message.text or "").strip()
+        if not code:
+            await message.answer("❌ Пустой промокод. Введите код ещё раз.")
+            return
+        promo, reason = check_promo_code_available(code, message.from_user.id)
+        if not promo:
+            reasons = {
+                "not_found": "❌ Промокод не найден.",
+                "inactive": "❌ Промокод деактивирован.",
+                "not_started": "❌ Промокод ещё не начал действовать.",
+                "expired": "❌ Срок действия промокода истёк.",
+                "total_limit_reached": "❌ Достигнут общий лимит использования промокода.",
+                "user_limit_reached": "❌ Вы исчерпали лимит использования промокода.",
+                "db_error": "❌ Ошибка базы данных. Попробуйте позже.",
+                "empty_code": "❌ Пустой промокод.",
+            }
+            await message.answer(reasons.get(reason or "not_found", "❌ Промокод недоступен."))
+            # Вернёмся к выбору оплаты
+            await show_payment_options(message, state)
+            return
+        # Сохраняем в состоянии применённый промокод
+        await state.update_data(
+            promo_code=promo.get("code"),
+            promo_discount_percent=promo.get("discount_percent"),
+            promo_discount_amount=promo.get("discount_amount"),
+        )
+        await message.answer("✅ Промокод применён.")
+        await show_payment_options(message, state)
+        await state.set_state(PaymentProcess.waiting_for_payment_method)
+
+    # --- Промокод: удалить
+    @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "remove_promo_code")
+    async def remove_promo(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer()
+        data = await state.get_data()
+        # Очистим поля промокода
+        data.pop('promo_code', None)
+        data.pop('promo_discount_percent', None)
+        data.pop('promo_discount_amount', None)
+        await state.set_data(data)
+        await callback.message.answer("Промокод удалён.")
+        await show_payment_options(callback.message, state)
 
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_yookassa")
     async def create_yookassa_payment_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -1666,6 +1788,17 @@ def get_user_router() -> Router:
                 discount_amount = (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
                 price_rub = base_price - discount_amount
 
+        final_price_decimal = price_rub
+        try:
+            final_price_from_state = data.get('final_price')
+            if final_price_from_state is not None:
+                final_price_decimal = Decimal(str(final_price_from_state)).quantize(Decimal("0.01"))
+        except Exception:
+            pass
+
+        if final_price_decimal < Decimal('0'):
+            final_price_decimal = Decimal('0.00')
+
         plan_id = data.get('plan_id')
         customer_email = data.get('customer_email')
         host_name = data.get('host_name')
@@ -1685,8 +1818,8 @@ def get_user_router() -> Router:
         user_id = callback.from_user.id
 
         try:
-            price_str_for_api = f"{price_rub:.2f}"
-            price_float_for_metadata = float(price_rub)
+            price_str_for_api = f"{final_price_decimal:.2f}"
+            price_float_for_metadata = float(final_price_decimal)
 
             receipt = None
             if customer_email and is_valid_email(customer_email):
@@ -1711,7 +1844,10 @@ def get_user_router() -> Router:
                     "action": str(action) if action is not None else "",
                     "key_id": (str(key_id) if key_id is not None else ""), "host_name": str(host_name) if host_name is not None else "",
                     "plan_id": (str(plan_id) if plan_id is not None else ""), "customer_email": customer_email or "",
-                    "payment_method": "YooKassa"
+                    "payment_method": "YooKassa",
+                    "promo_code": (data.get('promo_code') or ""),
+                    "promo_discount_percent": (str(data.get('promo_discount_percent')) if data.get('promo_discount_percent') is not None else ""),
+                    "promo_discount_amount": (str(data.get('promo_discount_amount')) if data.get('promo_discount_amount') is not None else ""),
                 }
             }
             if receipt:
@@ -1751,6 +1887,20 @@ def get_user_router() -> Router:
             if discount_percentage > 0:
                 price_rub = base_price - (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
 
+        # Учитываем промокод (final_price хранится в состоянии как float)
+        final_price_decimal = price_rub
+        try:
+            final_price_from_state = data.get('final_price')
+            if final_price_from_state is not None:
+                final_price_decimal = Decimal(str(final_price_from_state)).quantize(Decimal("0.01"))
+        except Exception:
+            pass
+
+        if final_price_decimal < Decimal('0'):
+            final_price_decimal = Decimal('0.00')
+
+        final_price_float = float(final_price_decimal)
+
         ym_wallet = (get_setting("yoomoney_wallet") or "").strip()
         if not ym_wallet:
             await callback.message.edit_text("❌ Оплата через ЮMoney временно недоступна.")
@@ -1764,17 +1914,20 @@ def get_user_router() -> Router:
             "payment_id": payment_id,
             "user_id": user_id,
             "months": months,
-            "price": float(price_rub),
+            "price": final_price_float,
             "action": data.get('action'),
             "key_id": data.get('key_id'),
             "host_name": data.get('host_name'),
             "plan_id": data.get('plan_id'),
             "customer_email": data.get('customer_email'),
             "payment_method": "YooMoney",
+            "promo_code": data.get('promo_code'),
+            "promo_discount_percent": data.get('promo_discount_percent'),
+            "promo_discount_amount": data.get('promo_discount_amount'),
         }
         # Сохраняем pending транзакцию в БД
         try:
-            create_pending_transaction(payment_id, user_id, float(price_rub), metadata)
+            create_pending_transaction(payment_id, user_id, final_price_float, metadata)
         except Exception as e:
             logger.warning(f"YooMoney: failed to create pending transaction: {e}")
 
@@ -1786,7 +1939,7 @@ def get_user_router() -> Router:
         targets = f"Оплата {months} мес."
         pay_url = _build_yoomoney_quickpay_url(
             wallet=ym_wallet,
-            amount=float(price_rub),
+            amount=final_price_float,
             label=payment_id,
             success_url=success_url,
             targets=targets,
@@ -1838,6 +1991,9 @@ def get_user_router() -> Router:
             "plan_id": data.get('plan_id'),
             "customer_email": data.get('customer_email'),
             "payment_method": "Stars",
+            "promo_code": data.get('promo_code'),
+            "promo_discount_percent": data.get('promo_discount_percent'),
+            "promo_discount_amount": data.get('promo_discount_amount'),
         }
         try:
             create_pending_transaction(payment_id, callback.from_user.id, float(price_decimal), metadata)
@@ -1952,7 +2108,10 @@ def get_user_router() -> Router:
             "user_id": user_id, "months": plan['months'], "price": float(price_rub),
             "action": data.get('action'), "key_id": data.get('key_id'),
             "host_name": data.get('host_name'), "plan_id": data.get('plan_id'),
-            "customer_email": data.get('customer_email'), "payment_method": "TON Connect"
+            "customer_email": data.get('customer_email'), "payment_method": "TON Connect",
+            "promo_code": data.get('promo_code'),
+            "promo_discount_percent": data.get('promo_discount_percent'),
+            "promo_discount_amount": data.get('promo_discount_amount'),
         }
         create_pending_transaction(payment_id, user_id, float(price_rub), metadata)
 
@@ -2021,6 +2180,9 @@ def get_user_router() -> Router:
             "plan_id": data.get('plan_id'),
             "customer_email": data.get('customer_email'),
             "payment_method": "Balance",
+            "promo_code": data.get('promo_code'),
+            "promo_discount_percent": data.get('promo_discount_percent'),
+            "promo_discount_amount": data.get('promo_discount_amount'),
             "chat_id": callback.message.chat.id,
             "message_id": callback.message.message_id
         }
@@ -2114,6 +2276,9 @@ async def _create_heleket_payment_request(
             "plan_id": state_data.get("plan_id"),
             "customer_email": state_data.get("customer_email"),
             "payment_method": "Crypto",
+            "promo_code": state_data.get("promo_code"),
+            "promo_discount_percent": state_data.get('promo_discount_percent'),
+            "promo_discount_amount": state_data.get('promo_discount_amount'),
         }
 
         # Базовые поля счёта для Heleket
@@ -2226,6 +2391,7 @@ async def _create_cryptobot_invoice(
             str(state_data.get("plan_id")),
             str(state_data.get("customer_email")),
             "CryptoBot",
+            str(state_data.get("promo_code") or ""),
         ]
         payload = ":".join(payload_parts)
 
@@ -2665,6 +2831,96 @@ async def process_successful_payment(bot: Bot, metadata: dict):
             payment_method=log_method,
             metadata=log_metadata
         )
+        # Если был применён промокод, фиксируем использование и при необходимости отключаем по лимиту
+        try:
+            promo_code_used = (metadata.get('promo_code') or '').strip()
+            if promo_code_used:
+                try:
+                    # Пытаемся оценить применённую скидку, если доступна фиксированная сумма
+                    applied_amt = 0.0
+                    try:
+                        if metadata.get('promo_discount_amount') is not None:
+                            applied_amt = float(metadata.get('promo_discount_amount') or 0.0)
+                    except Exception:
+                        applied_amt = 0.0
+                    redeemed = redeem_promo_code(
+                        promo_code_used,
+                        user_id,
+                        applied_amount=float(applied_amt or 0.0),
+                        order_id=payment_id_for_log,
+                    )
+                    if redeemed:
+                        # Определяем причины для автоматической деактивации
+                        limit_total = redeemed.get('usage_limit_total')
+                        per_user_limit = redeemed.get('usage_limit_per_user')
+                        used_total_now = redeemed.get('used_total') or 0
+                        user_usage_count = redeemed.get('user_usage_count')
+                        should_deactivate = False
+                        reason_lines: list[str] = []
+
+                        if limit_total:
+                            try:
+                                if used_total_now >= int(limit_total):
+                                    should_deactivate = True
+                                    reason_lines.append("достигнут общий лимит использования")
+                            except Exception:
+                                pass
+
+                        if per_user_limit:
+                            try:
+                                if (user_usage_count or 0) >= int(per_user_limit):
+                                    should_deactivate = True
+                                    reason_lines.append("исчерпан лимит на пользователя")
+                            except Exception:
+                                pass
+
+                        # Если не достигнуты лимиты, всё равно выключаем по требованию (при наличии любого лимита)
+                        if not should_deactivate and (limit_total or per_user_limit):
+                            should_deactivate = True
+                            if per_user_limit and not reason_lines:
+                                reason_lines.append("лимит на пользователя выставлен (код погашён)")
+                            elif limit_total and not reason_lines:
+                                reason_lines.append("лимит по количеству использований выставлен (код погашён)")
+
+                        if should_deactivate:
+                            try:
+                                update_promo_code_status(promo_code_used, is_active=False)
+                            except Exception:
+                                pass
+
+                        # Уведомим администраторов о факте использования
+                        try:
+                            plan = get_plan_by_id(plan_id)
+                            plan_name = plan.get('plan_name', 'Unknown') if plan else 'Unknown'
+                            admins = list(get_admin_ids() or [])
+                            if should_deactivate:
+                                status_line = "Статус: деактивирован"
+                                if reason_lines:
+                                    status_line += " (" + ", ".join(reason_lines) + ")"
+                            else:
+                                status_line = "Статус: активен"
+                                if limit_total:
+                                    status_line += f" (использовано {used_total_now} из {limit_total})"
+                                else:
+                                    status_line += f" (использовано {used_total_now})"
+                            text = (
+                                "🎟️ Промокод использован\n"
+                                f"Код: {promo_code_used}\n"
+                                f"Пользователь: {user_id}\n"
+                                f"Тариф: {plan_name} ({months} мес.)\n"
+                                f"{status_line}"
+                            )
+                            for aid in admins:
+                                try:
+                                    await bot.send_message(int(aid), text)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.warning(f"Promo redeem failed for user {user_id}, code {promo_code_used}: {e}")
+        except Exception:
+            pass
         
         # Аккуратно удаляем служебное сообщение о обработке, если возможно
         try:

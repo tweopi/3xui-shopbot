@@ -20,6 +20,9 @@ from shop_bot.data_manager.database import (
     delete_ticket,
     is_admin,
     get_admin_ids,
+    get_user,
+    ban_user,
+    unban_user,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,12 +65,22 @@ def get_support_router() -> Router:
             status = (t and t.get('status')) or 'open'
         except Exception:
             status = 'open'
+        user_id: int | None = None
+        is_banned: bool = False
+        if t and t.get('user_id') is not None:
+            try:
+                user_id = int(t.get('user_id'))
+                user_data = get_user(user_id) or {}
+                is_banned = bool(user_data.get('is_banned'))
+            except Exception:
+                user_id = None
+                is_banned = False
         first_row: list[types.InlineKeyboardButton] = []
         if status == 'open':
             first_row.append(types.InlineKeyboardButton(text="✅ Закрыть", callback_data=f"admin_close_{ticket_id}"))
         else:
             first_row.append(types.InlineKeyboardButton(text="🔓 Переоткрыть", callback_data=f"admin_reopen_{ticket_id}"))
-        inline_kb = [
+        inline_kb: list[list[types.InlineKeyboardButton]] = [
             first_row,
             [types.InlineKeyboardButton(text="🗑 Удалить", callback_data=f"admin_delete_{ticket_id}")],
             [
@@ -77,6 +90,11 @@ def get_support_router() -> Router:
             ],
             [types.InlineKeyboardButton(text="🗒 Заметки", callback_data=f"admin_notes_{ticket_id}")],
         ]
+        if user_id is not None:
+            toggle_label = "✅ Разбанить пользователя" if is_banned else "🚫 Забанить пользователя"
+            inline_kb.append([
+                types.InlineKeyboardButton(text=toggle_label, callback_data=f"admin_toggle_ban_{ticket_id}")
+            ])
         return types.InlineKeyboardMarkup(inline_keyboard=inline_kb)
 
     async def _is_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
@@ -706,6 +724,70 @@ def get_support_router() -> Router:
             f"Username: @{username}\n" if username else ""
         ) + f"Ссылка: {mention_link}"
         await callback.message.answer(text, parse_mode="Markdown")
+
+    @router.callback_query(F.data.startswith("admin_toggle_ban_"))
+    async def admin_toggle_ban(callback: types.CallbackQuery, bot: Bot):
+        await callback.answer()
+        try:
+            ticket_id = int(callback.data.split("_")[-1])
+        except Exception:
+            return
+        ticket = get_ticket(ticket_id)
+        if not ticket:
+            await callback.message.answer("Тикет не найден.")
+            return
+        forum_chat_id_raw = ticket.get('forum_chat_id')
+        forum_chat_id = int(forum_chat_id_raw) if forum_chat_id_raw else callback.message.chat.id
+        if not await _is_admin(bot, forum_chat_id, callback.from_user.id):
+            return
+        user_id_raw = ticket.get('user_id')
+        if not user_id_raw:
+            await callback.message.answer("❌ Не удалось определить пользователя тикета.")
+            return
+        try:
+            user_id = int(user_id_raw)
+        except Exception:
+            await callback.message.answer("❌ Некорректный идентификатор пользователя.")
+            return
+        try:
+            user_data = get_user(user_id) or {}
+            currently_banned = bool(user_data.get('is_banned'))
+        except Exception:
+            currently_banned = False
+        try:
+            if currently_banned:
+                unban_user(user_id)
+            else:
+                ban_user(user_id)
+        except Exception as e:
+            await callback.message.answer(f"❌ Не удалось обновить статус блокировки: {e}")
+            return
+
+        status_text: str
+        if currently_banned:
+            status_text = f"✅ Пользователь {user_id} разбанен."
+            try:
+                await bot.send_message(
+                    user_id,
+                    "✅ Ваш аккаунт разблокирован администратором. Вы снова можете пользоваться сервисом."
+                )
+            except Exception:
+                pass
+        else:
+            status_text = f"🚫 Пользователь {user_id} забанен."
+            support_contact = (get_setting("support_bot_username") or get_setting("support_user") or "").strip()
+            ban_message = "🚫 Ваш аккаунт заблокирован администратором."
+            if support_contact:
+                ban_message += f"\nЕсли это ошибка, свяжитесь с поддержкой: {support_contact}"
+            try:
+                await bot.send_message(user_id, ban_message)
+            except Exception:
+                pass
+        try:
+            await callback.message.edit_reply_markup(reply_markup=_admin_actions_kb(ticket_id))
+        except Exception:
+            pass
+        await callback.message.answer(status_text)
 
     @router.callback_query(F.data.startswith("admin_note_"))
     async def admin_note_prompt(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
