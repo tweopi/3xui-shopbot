@@ -86,7 +86,20 @@
         <a href="docs/screenshots/bot-settings.png"><img src="docs/screenshots/bot-settings.png" width="360" alt="Bot Settings"/></a><br>
         <sub>Бот — Настройки/Помощь</sub>
       </td>
-      <td></td>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/button_design.png"><img src="docs/screenshots/button_design.png" width="480" alt="Button Constructor"/></a><br>
+        <sub>Панель — Конструктор кнопок</sub>
+      </td>
+    </tr>
+    <tr>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/monitor.png"><img src="docs/screenshots/monitor.png" width="480" alt="Monitor"/></a><br>
+        <sub>Панель — Мониторинг</sub>
+      </td>
+      <td align="center" valign="top">
+        <a href="docs/screenshots/preview.png"><img src="docs/screenshots/preview.png" width="360" alt="Preview"/></a><br>
+        <sub>Панель — Предпросмотр меню</sub>
+      </td>
     </tr>
   </table>
  
