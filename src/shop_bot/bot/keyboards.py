@@ -62,6 +62,7 @@ def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: 
     builder.button(text=(get_setting("btn_support") or "🆘 Поддержка"), callback_data="show_help")
     builder.button(text=(get_setting("btn_about") or "ℹ️ О проекте"), callback_data="show_about")
     builder.button(text=(get_setting("btn_howto") or "❓ Как использовать"), callback_data="howto_vless")
+    builder.button(text=(get_setting("btn_speed") or "⚡ Тест скорости"), callback_data="user_speedtest")
     if is_admin:
         builder.button(text=(get_setting("btn_admin") or "⚙️ Админка"), callback_data="admin_menu")
 
@@ -71,7 +72,7 @@ def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: 
         2,  # купить ключ + пополнить баланс
         1,  # рефералка
         2,  # поддержка + о проекте
-        1,  # как использовать
+        2,  # как использовать + тест скорости
         1 if is_admin else 0,  # админка
     ]
     actual_layout = [size for size in layout if size > 0]
@@ -735,4 +736,12 @@ def create_admin_months_pick_keyboard(action: str = "gift") -> InlineKeyboardMar
         builder.button(text=f"{m} мес.", callback_data=f"admin_{action}_pick_months_{m}")
     builder.button(text="⬅️ Назад", callback_data=f"admin_{action}_back_to_hosts")
     builder.adjust(2, 2, 1)
+    return builder.as_markup()
+
+
+def create_back_to_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Создать клавиатуру с кнопкой возврата в главное меню"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
+    builder.adjust(1)
     return builder.as_markup()

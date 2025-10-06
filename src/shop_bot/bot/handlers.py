@@ -1335,6 +1335,69 @@ def get_user_router() -> Router:
         except TelegramBadRequest:
             pass
 
+    @user_router.callback_query(F.data == "user_speedtest")
+    @registration_required
+    async def user_speedtest_handler(callback: types.CallbackQuery):
+        await callback.answer()
+        
+        try:
+            # Получаем список хостов
+            hosts = get_all_hosts() or []
+            if not hosts:
+                await callback.message.edit_text(
+                    "⚠️ Хосты не найдены в настройках. Обратитесь к администратору.",
+                    reply_markup=keyboards.create_back_to_main_menu_keyboard()
+                )
+                return
+            
+            # Показываем последние результаты тестов скорости для всех хостов
+            text = "⚡️ <b>Последние результаты Speedtest</b>\n\n"
+            
+            from shop_bot.data_manager.database import get_latest_speedtest
+            
+            for host in hosts:
+                host_name = host.get('host_name', 'Неизвестный хост')
+                latest_test = get_latest_speedtest(host_name)
+                
+                if latest_test:
+                    ping = latest_test.get('ping_ms')
+                    download = latest_test.get('download_mbps')
+                    upload = latest_test.get('upload_mbps')
+                    server = latest_test.get('server_name', '—')
+                    method = latest_test.get('method', 'unknown').upper()
+                    created_at = latest_test.get('created_at', '—')
+                    
+                    # Форматируем время в нужном формате
+                    try:
+                        from datetime import datetime
+                        if created_at and created_at != '—':
+                            dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            time_str = dt.strftime('%d.%m %H:%M')
+                        else:
+                            time_str = '—'
+                    except:
+                        time_str = created_at
+                    
+                    # Форматируем значения
+                    ping_str = f"{ping:.2f}" if ping is not None else "—"
+                    download_str = f"{download:.0f}" if download is not None else "—"
+                    upload_str = f"{upload:.0f}" if upload is not None else "—"
+                    
+                    # Создаем строку в нужном формате
+                    text += f"• 🌏{host_name} — {method}: ✅ · ⏱️ {ping_str} ms · ↓ {download_str} Mbps · ↑ {upload_str} Mbps · 🕒 {time_str}\n"
+                else:
+                    text += f"• 🌏{host_name} — Нет данных о тестах скорости\n"
+            
+            
+            await callback.message.edit_text(
+                text,
+                reply_markup=keyboards.create_back_to_main_menu_keyboard(),
+                disable_web_page_preview=True
+            )
+        except TelegramBadRequest:
+            pass
+
+
     @user_router.callback_query(F.data == "howto_android")
     @registration_required
     async def howto_android_handler(callback: types.CallbackQuery):
