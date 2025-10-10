@@ -58,6 +58,10 @@ def get_local_metrics() -> Dict[str, Any]:
         'disk_free': None,
         'disk_percent': None,
         'uptime_seconds': None,
+        'network_sent': None,
+        'network_recv': None,
+        'network_packets_sent': None,
+        'network_packets_recv': None,
         'error': None,
     }
 
@@ -92,6 +96,17 @@ def get_local_metrics() -> Dict[str, Any]:
         out['mem_used'] = int(vm.used)
         out['mem_available'] = int(vm.available)
         out['mem_percent'] = float(vm.percent)
+        
+        # Network data
+        try:
+            net_io = psutil.net_io_counters()
+            out['network_sent'] = int(net_io.bytes_sent)
+            out['network_recv'] = int(net_io.bytes_recv)
+            out['network_packets_sent'] = int(net_io.packets_sent)
+            out['network_packets_recv'] = int(net_io.packets_recv)
+        except Exception:
+            pass
+            
         try:
             out['uptime_seconds'] = float(time.time() - psutil.boot_time())
         except Exception:
@@ -281,13 +296,25 @@ def collect_hosts_metrics() -> Dict[str, Any]:
         return {'ok': False, 'items': [], 'error': f'get_all_hosts failed: {e}'}
 
     for h in hosts:
-        # только хосты с настроенным SSH
-        if not (h.get('ssh_host') and h.get('ssh_user')):
-            continue
-        try:
-            m = get_host_metrics_via_ssh(h)
-        except Exception as e:
-            m = {'ok': False, 'host_name': h.get('host_name'), 'error': str(e)}
+        # Проверяем наличие SSH настроек
+        if h.get('ssh_host') and h.get('ssh_user'):
+            # Хост с SSH - получаем метрики
+            try:
+                m = get_host_metrics_via_ssh(h)
+            except Exception as e:
+                m = {'ok': False, 'host_name': h.get('host_name'), 'error': str(e)}
+        else:
+            # Хост без SSH - показываем базовую информацию
+            m = {
+                'ok': False,
+                'host_name': h.get('host_name'),
+                'host_url': h.get('host_url'),
+                'error': 'SSH не настроен',
+                'cpu_percent': None,
+                'mem_percent': None,
+                'disk_percent': None,
+                'uptime_seconds': None
+            }
         items.append(m)
 
     return {'ok': True, 'items': items}

@@ -75,10 +75,14 @@ ALL_SETTINGS_KEYS = [
     "panel_brand_title",
     # Backups
     "backup_interval_days",
+    # Monitoring
+    "monitoring_enabled", "monitoring_interval_sec",
+    "monitoring_cpu_threshold", "monitoring_mem_threshold", "monitoring_disk_threshold",
+    "monitoring_alert_cooldown_sec",
     # Telegram Stars
     "stars_enabled", "stars_per_rub", "stars_title", "stars_description",
     # YooMoney (separate)
-    "yoomoney_enabled", "yoomoney_wallet", "yoomoney_api_token",
+    "yoomoney_enabled", "yoomoney_wallet", "yoomoney_secret", "yoomoney_api_token",
     "yoomoney_client_id", "yoomoney_client_secret", "yoomoney_redirect_uri",
 ]
 
@@ -289,6 +293,13 @@ def create_webhook_app(bot_controller_instance):
     @login_required
     def monitor_page():
         common_data = get_common_template_data()
+        # Add hosts and ssh_targets for monitor template
+        hosts = get_all_hosts()
+        ssh_targets = []  # SSH targets not implemented yet
+        common_data.update({
+            'hosts': hosts,
+            'ssh_targets': ssh_targets
+        })
         return render_template('monitor.html', **common_data)
 
     @flask_app.route('/monitor/local.json')
@@ -318,6 +329,17 @@ def create_webhook_app(bot_controller_instance):
                 return jsonify({"ok": False, "error": "host not found"}), 404
             data = resource_monitor.get_host_metrics_via_ssh(host)
             return jsonify(data)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @flask_app.route('/monitor/metrics/<scope>/<object_name>.json')
+    @login_required
+    def monitor_metrics_json(scope: str, object_name: str):
+        try:
+            since_hours = int(request.args.get('since_hours', '24'))
+            limit = int(request.args.get('limit', '500'))
+            items = database.get_metrics_series(scope, object_name, since_hours=since_hours, limit=limit)
+            return jsonify({"ok": True, "items": items})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -1216,7 +1238,7 @@ def create_webhook_app(bot_controller_instance):
                 update_setting('panel_password', request.form.get('panel_password'))
 
             # Обработка чекбоксов, где в форме идёт hidden=false + checkbox=true
-            checkbox_keys = ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled']
+            checkbox_keys = ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled', 'monitoring_enabled']
             for checkbox_key in checkbox_keys:
                 values = request.form.getlist(checkbox_key)
                 value = values[-1] if values else 'false'
@@ -1886,6 +1908,165 @@ def create_webhook_app(bot_controller_instance):
         else:
             flash('YooMoney: не удалось проверить operation-history.', 'warning')
         return redirect(url_for('settings_page', tab='payments'))
+
+    # --- Button Constructor ---
+    @flask_app.route('/button-constructor')
+    @login_required
+    def button_constructor_page():
+        """Button constructor page"""
+        template_data = get_common_template_data()
+        return render_template('button_constructor.html', **template_data)
+
+    # --- Button Constructor API ---
+    @flask_app.route('/api/button-configs', methods=['GET', 'POST'])
+    @login_required
+    def button_configs_api():
+        if request.method == 'GET':
+            menu_type = request.args.get('menu_type', 'main_menu')
+            try:
+                from shop_bot.data_manager.database import get_button_configs
+                configs = get_button_configs(menu_type)
+                return jsonify({"success": True, "data": configs})
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+        
+        elif request.method == 'POST':
+            try:
+                data = request.get_json()
+                from shop_bot.data_manager.database import create_button_config
+                button_id = create_button_config(data)
+                if button_id:
+                    return jsonify({"success": True, "id": button_id})
+                else:
+                    return jsonify({"success": False, "error": "Failed to create button config"}), 500
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+    @flask_app.route('/api/button-configs/<menu_type>', methods=['GET'])
+    @login_required
+    def button_configs_by_menu_api(menu_type):
+        try:
+            from shop_bot.data_manager.database import get_button_configs
+            configs = get_button_configs(menu_type)
+            return jsonify({"success": True, "data": configs})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @flask_app.route('/api/button-configs/<int:button_id>', methods=['PUT', 'DELETE'])
+    @login_required
+    def button_config_api(button_id):
+        if request.method == 'PUT':
+            try:
+                data = request.get_json()
+                from shop_bot.data_manager.database import update_button_config
+                success = update_button_config(button_id, data)
+                if success:
+                    return jsonify({"success": True})
+                else:
+                    return jsonify({"success": False, "error": "Button config not found or update failed"}), 404
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+        
+        elif request.method == 'DELETE':
+            try:
+                from shop_bot.data_manager.database import delete_button_config
+                success = delete_button_config(button_id)
+                if success:
+                    return jsonify({"success": True})
+                else:
+                    return jsonify({"success": False, "error": "Button config not found"}), 404
+            except Exception as e:
+                return jsonify({"success": False, "error": str(e)}), 500
+
+    @flask_app.route('/api/button-configs/<menu_type>/reorder', methods=['POST'])
+    @login_required
+    def button_configs_reorder_api(menu_type):
+        try:
+            data = request.get_json()
+            button_orders = data.get('button_orders', [])
+            from shop_bot.data_manager.database import reorder_button_configs
+            success = reorder_button_configs(menu_type, button_orders)
+            if success:
+                return jsonify({"success": True})
+            else:
+                return jsonify({"success": False, "error": "Failed to reorder buttons"}), 500
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+    
+    @flask_app.route('/api/button-configs/force-migration', methods=['POST'])
+    @login_required
+    def force_button_migration_api():
+        """Принудительная миграция кнопок."""
+        try:
+            from shop_bot.data_manager.database import force_button_migration
+            success = force_button_migration()
+            if success:
+                return jsonify({"success": True, "message": "Миграция кнопок выполнена успешно"})
+            else:
+                return jsonify({"success": False, "error": "Миграция не удалась"}), 500
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    # --- YooMoney Webhook ---
+    @csrf.exempt
+    @flask_app.route('/yoomoney-webhook', methods=['POST'])
+    def yoomoney_webhook_handler():
+        """ЮMoney HTTP уведомление (кнопка/ссылка p2p). Подпись: sha1(notification_type&operation_id&amount&currency&datetime&sender&codepro&notification_secret&label)."""
+        logger.info("🔔 Получен webhook от ЮMoney")
+        
+        try:
+            form = request.form
+            logger.info(f"YooMoney webhook data: {dict(form)}")
+            
+            # Проверяем, что это тестовый платеж
+            if form.get('codepro') == 'true':
+                logger.info("🧪 Игнорируем тестовый платеж (codepro=true)")
+                return 'OK', 200
+            
+            secret = get_setting('yoomoney_secret') or ''
+            signature_str = "&".join([
+                form.get('notification_type',''),
+                form.get('operation_id',''),
+                form.get('amount',''),
+                form.get('currency',''),
+                form.get('datetime',''),
+                form.get('sender',''),
+                form.get('codepro',''),
+                secret,
+                form.get('label','')
+            ])
+            
+            import hashlib
+            expected_signature = hashlib.sha1(signature_str.encode('utf-8')).hexdigest()
+            received_signature = form.get('sha1_hash', '')
+            
+            if not compare_digest(expected_signature, received_signature):
+                logger.warning("YooMoney webhook: неверная подпись")
+                return 'Forbidden', 403
+            
+            # Обрабатываем успешный платеж
+            if form.get('notification_type') == 'p2p-incoming':
+                amount = float(form.get('amount', 0))
+                label = form.get('label', '')
+                
+                # Здесь должна быть логика обработки платежа
+                logger.info(f"YooMoney payment: {amount} RUB, label: {label}")
+                
+                # Уведомляем бота о платеже
+                try:
+                    bot = _bot_controller.get_bot_instance()
+                    if bot:
+                        # Здесь должна быть логика обработки платежа через handlers
+                        pass
+                except Exception as e:
+                    logger.error(f"YooMoney webhook: ошибка уведомления бота: {e}")
+            
+            return 'OK', 200
+            
+        except Exception as e:
+            logger.error(f"YooMoney webhook error: {e}", exc_info=True)
+            return 'Error', 500
+
     return flask_app
 
 

@@ -36,6 +36,7 @@
       <li class="nav-item"><a class="nav-link" href="#hosts">Хосты/Тарифы</a></li>
       <li class="nav-item"><a class="nav-link" href="#referrals">Рефералы</a></li>
       <li class="nav-item"><a class="nav-link" href="#trial">Триал</a></li>
+      <li class="nav-item"><a class="nav-link" href="#monitoring">Мониторинг</a></li>
       <li class="nav-item"><a class="nav-link" href="#content">Контент</a></li>
     </ul>
   </div>
@@ -682,6 +683,46 @@
 
 					</div> <!-- /card-body -->
 				</div>   <!-- /card -->
+			</section>
+
+			<section class="settings-section" id="monitoring">
+				<div class="card">
+					<div class="card-header"><h2 class="card-title">Настройки Мониторинга</h2></div>
+					<div class="card-body">
+						<div class="mb-3">
+							<input type="hidden" name="monitoring_enabled" value="false" />
+							<div class="form-check">
+								<input class="form-check-input" type="checkbox" id="monitoring_enabled" name="monitoring_enabled" value="true" {% if settings.monitoring_enabled == 'true' %}checked{% endif %}>
+								<label class="form-check-label" for="monitoring_enabled">Включить мониторинг ресурсов</label>
+							</div>
+						</div>
+						<div class="mb-3">
+							<label class="form-label" for="monitoring_interval_sec">Интервал сбора метрик (секунды)</label>
+							<input class="form-control" type="number" id="monitoring_interval_sec" name="monitoring_interval_sec" value="{{ settings.monitoring_interval_sec or '60' }}" min="10" max="3600" />
+							<div class="form-text text-secondary">Как часто собирать метрики с серверов (10-3600 секунд)</div>
+						</div>
+						<div class="mb-3">
+							<label class="form-label" for="monitoring_cpu_threshold">Порог CPU для уведомлений (%)</label>
+							<input class="form-control" type="number" id="monitoring_cpu_threshold" name="monitoring_cpu_threshold" value="{{ settings.monitoring_cpu_threshold or '80' }}" min="1" max="100" />
+							<div class="form-text text-secondary">Уведомление отправляется при превышении загрузки CPU</div>
+						</div>
+						<div class="mb-3">
+							<label class="form-label" for="monitoring_mem_threshold">Порог памяти для уведомлений (%)</label>
+							<input class="form-control" type="number" id="monitoring_mem_threshold" name="monitoring_mem_threshold" value="{{ settings.monitoring_mem_threshold or '85' }}" min="1" max="100" />
+							<div class="form-text text-secondary">Уведомление отправляется при превышении использования памяти</div>
+						</div>
+						<div class="mb-3">
+							<label class="form-label" for="monitoring_disk_threshold">Порог диска для уведомлений (%)</label>
+							<input class="form-control" type="number" id="monitoring_disk_threshold" name="monitoring_disk_threshold" value="{{ settings.monitoring_disk_threshold or '90' }}" min="1" max="100" />
+							<div class="form-text text-secondary">Уведомление отправляется при превышении заполнения диска</div>
+						</div>
+						<div class="mb-3">
+							<label class="form-label" for="monitoring_alert_cooldown_sec">Кулдаун уведомлений (секунды)</label>
+							<input class="form-control" type="number" id="monitoring_alert_cooldown_sec" name="monitoring_alert_cooldown_sec" value="{{ settings.monitoring_alert_cooldown_sec or '300' }}" min="60" max="86400" />
+							<div class="form-text text-secondary">Минимальный интервал между уведомлениями об одних и тех же проблемах</div>
+						</div>
+					</div>
+				</div>
 			</section>
 
 			<section class="settings-section" id="content">

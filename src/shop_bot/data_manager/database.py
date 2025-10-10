@@ -136,6 +136,46 @@ def initialize_db():
                 )
             ''')
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_host_speedtests_host_time ON host_speedtests(host_name, created_at DESC)")
+            
+            # Таблица для метрик ресурсов
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS resource_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope TEXT NOT NULL,                -- 'local' | 'host' | 'target'
+                    object_name TEXT NOT NULL,          -- 'panel' | host_name | target_name
+                    cpu_percent REAL,
+                    mem_percent REAL,
+                    disk_percent REAL,
+                    load1 REAL,
+                    net_bytes_sent INTEGER,
+                    net_bytes_recv INTEGER,
+                    raw_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_resource_metrics_scope_time ON resource_metrics(scope, object_name, created_at DESC)")
+            
+            # Таблица для конфигураций кнопок
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS button_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    menu_type TEXT NOT NULL DEFAULT 'main_menu',
+                    button_id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    callback_data TEXT,
+                    url TEXT,
+                    row_position INTEGER DEFAULT 0,
+                    column_position INTEGER DEFAULT 0,
+                    button_width INTEGER DEFAULT 1,
+                    sort_order INTEGER DEFAULT 0,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(menu_type, button_id)
+                )
+            ''')
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_button_configs_menu_type ON button_configs(menu_type, sort_order)")
+            
             default_settings = {
                 "panel_login": "admin",
                 "panel_password": "admin",
@@ -238,6 +278,24 @@ def initialize_db():
             for key, value in default_settings.items():
                 cursor.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
             conn.commit()
+            
+            # Reset and migrate existing button configurations with correct layout
+            reset_button_migration()
+            migrate_existing_buttons()
+            
+            # Clean up any duplicate buttons
+            cleanup_duplicate_buttons()
+            
+            # Миграция: добавить колонку created_date в vpn_keys если её нет
+            try:
+                cursor.execute("PRAGMA table_info(vpn_keys)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if 'created_date' not in columns:
+                    cursor.execute("ALTER TABLE vpn_keys ADD COLUMN created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                    logging.info("Добавлена колонка created_date в таблицу vpn_keys")
+            except Exception as e:
+                logging.warning(f"Ошибка при добавлении колонки created_date: {e}")
+            
             logging.info("База данных успешно инициализирована.")
     except sqlite3.Error as e:
         logging.error(f"Ошибка базы данных при инициализации: {e}")
@@ -2487,3 +2545,406 @@ def get_latest_host_metrics(host_name: str) -> dict | None:
     except sqlite3.Error as e:
         logging.error(f"get_latest_host_metrics failed for '{host_name}': {e}")
         return None
+
+# --- Button Configs Functions ---
+def get_button_configs(menu_type: str = None) -> list[dict]:
+    """Get all button configurations, optionally filtered by menu_type."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            if menu_type:
+                cursor.execute(
+                    "SELECT * FROM button_configs WHERE menu_type = ? ORDER BY sort_order, id",
+                    (menu_type,)
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM button_configs ORDER BY menu_type, sort_order, id"
+                )
+            
+            return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get button configs: {e}")
+        return []
+
+def get_button_config(button_id: int) -> dict | None:
+    """Get a specific button configuration by ID."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM button_configs WHERE id = ?", (button_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except sqlite3.Error as e:
+        logging.error(f"Failed to get button config {button_id}: {e}")
+        return None
+
+def create_button_config(config: dict) -> int | None:
+    """Create a new button configuration. Returns the new ID or None on error."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO button_configs (
+                    menu_type, button_id, text, callback_data, url,
+                    row_position, column_position, button_width, sort_order, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    config.get('menu_type', 'main_menu'),
+                    config.get('button_id', ''),
+                    config.get('text', ''),
+                    config.get('callback_data'),
+                    config.get('url'),
+                    config.get('row_position', 0),
+                    config.get('column_position', 0),
+                    config.get('button_width', 1),
+                    config.get('sort_order', 0),
+                    config.get('is_active', True)
+                )
+            )
+            return cursor.lastrowid
+    except sqlite3.Error as e:
+        logging.error(f"Failed to create button config: {e}")
+        return None
+
+def update_button_config(button_id: int, config: dict) -> bool:
+    """Update an existing button configuration."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                UPDATE button_configs SET
+                    text = ?, callback_data = ?, url = ?,
+                    row_position = ?, column_position = ?, button_width = ?,
+                    sort_order = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                ''',
+                (
+                    config.get('text', ''),
+                    config.get('callback_data'),
+                    config.get('url'),
+                    config.get('row_position', 0),
+                    config.get('column_position', 0),
+                    config.get('button_width', 1),
+                    config.get('sort_order', 0),
+                    config.get('is_active', True),
+                    button_id
+                )
+            )
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to update button config {button_id}: {e}")
+        return False
+
+def delete_button_config(button_id: int) -> bool:
+    """Delete a button configuration."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM button_configs WHERE id = ?", (button_id,))
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Failed to delete button config {button_id}: {e}")
+        return False
+
+def reorder_button_configs(menu_type: str, button_orders: list[dict]) -> bool:
+    """Reorder and reposition button configurations for a specific menu type.
+    Accepts items with either 'id' or 'button_id'. Updates sort_order, row_position,
+    column_position, and button_width.
+    """
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            for order_data in button_orders:
+                sort_order = int(order_data.get('sort_order', 0) or 0)
+                row_pos = int(order_data.get('row_position', 0) or 0)
+                col_pos = int(order_data.get('column_position', 0) or 0)
+                btn_width = int(order_data.get('button_width', 1) or 1)
+
+                # Try resolve target id
+                btn_id = order_data.get('id')
+                if not btn_id:
+                    btn_key = order_data.get('button_id')
+                    if not btn_key:
+                        continue
+                    cursor.execute(
+                        "SELECT id FROM button_configs WHERE menu_type = ? AND button_id = ?",
+                        (menu_type, btn_key)
+                    )
+                    row = cursor.fetchone()
+                    if not row:
+                        continue
+                    btn_id = row[0]
+
+                cursor.execute(
+                    """
+                    UPDATE button_configs
+                    SET sort_order = ?, row_position = ?, column_position = ?, button_width = ?
+                    WHERE id = ? AND menu_type = ?
+                    """,
+                    (sort_order, row_pos, col_pos, btn_width, btn_id, menu_type)
+                )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Failed to reorder button configs for {menu_type}: {e}")
+        return False
+
+def migrate_existing_buttons() -> bool:
+    """Migrate existing button configurations from settings to button_configs table."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            
+            # Define button configurations for all menu types
+            menu_configs = {
+                'main_menu': [
+                    # Row 0: Wide buttons (full width)
+                    {'button_id': 'btn_try', 'callback_data': 'get_trial', 'text': '🎁 Попробовать бесплатно', 'row_position': 0, 'column_position': 0, 'button_width': 2},
+                    {'button_id': 'btn_profile', 'callback_data': 'show_profile', 'text': '👤 Мой профиль', 'row_position': 1, 'column_position': 0, 'button_width': 2},
+                    
+                    # Row 2: Two buttons
+                    {'button_id': 'btn_my_keys', 'callback_data': 'manage_keys', 'text': '🔑 Мои ключи ({count})', 'row_position': 2, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'btn_buy_key', 'callback_data': 'buy_new_key', 'text': '💳 Купить ключ', 'row_position': 2, 'column_position': 1, 'button_width': 1},
+                    
+                    # Row 3: Two buttons
+                    {'button_id': 'btn_top_up', 'callback_data': 'top_up_start', 'text': '➕ Пополнить баланс', 'row_position': 3, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'btn_referral', 'callback_data': 'show_referral_program', 'text': '🤝 Реферальная программа', 'row_position': 3, 'column_position': 1, 'button_width': 1},
+                    
+                    # Row 4: Two buttons
+                    {'button_id': 'btn_support', 'callback_data': 'show_help', 'text': '🆘 Поддержка', 'row_position': 4, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'btn_about', 'callback_data': 'show_about', 'text': 'ℹ️ О проекте', 'row_position': 4, 'column_position': 1, 'button_width': 1},
+                    
+                    # Row 5: Two buttons
+                    {'button_id': 'btn_howto', 'callback_data': 'howto_vless', 'text': '❓ Как использовать', 'row_position': 5, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'btn_speed', 'callback_data': 'user_speedtest', 'text': '⚡ Тест скорости', 'row_position': 5, 'column_position': 1, 'button_width': 1},
+                    
+                    # Row 6: Wide button
+                    {'button_id': 'btn_admin', 'callback_data': 'admin_menu', 'text': '⚙️ Админка', 'row_position': 6, 'column_position': 0, 'button_width': 2},
+                ],
+                'admin_menu': [
+                    {'button_id': 'admin_users', 'callback_data': 'admin_users', 'text': '👥 Пользователи', 'row_position': 0, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'admin_keys', 'callback_data': 'admin_keys', 'text': '🔑 Ключи', 'row_position': 0, 'column_position': 1, 'button_width': 1},
+                    {'button_id': 'admin_settings', 'callback_data': 'admin_settings', 'text': '⚙️ Настройки', 'row_position': 1, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'admin_stats', 'callback_data': 'admin_stats', 'text': '📊 Статистика', 'row_position': 1, 'column_position': 1, 'button_width': 1},
+                    {'button_id': 'admin_logs', 'callback_data': 'admin_logs', 'text': '📝 Логи', 'row_position': 2, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'admin_backup', 'callback_data': 'admin_backup', 'text': '💾 Резервная копия', 'row_position': 2, 'column_position': 1, 'button_width': 1},
+                    {'button_id': 'back_to_main', 'callback_data': 'main_menu', 'text': '🏠 Главное меню', 'row_position': 3, 'column_position': 0, 'button_width': 2},
+                ],
+                'profile_menu': [
+                    {'button_id': 'profile_info', 'callback_data': 'profile_info', 'text': 'ℹ️ Информация', 'row_position': 0, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'profile_balance', 'callback_data': 'profile_balance', 'text': '💰 Баланс', 'row_position': 0, 'column_position': 1, 'button_width': 1},
+                    {'button_id': 'profile_keys', 'callback_data': 'manage_keys', 'text': '🔑 Мои ключи', 'row_position': 1, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'profile_referrals', 'callback_data': 'show_referral_program', 'text': '🤝 Рефералы', 'row_position': 1, 'column_position': 1, 'button_width': 1},
+                    {'button_id': 'back_to_main', 'callback_data': 'main_menu', 'text': '🏠 Главное меню', 'row_position': 2, 'column_position': 0, 'button_width': 2},
+                ],
+                'support_menu': [
+                    {'button_id': 'support_new', 'callback_data': 'support_new_ticket', 'text': '📝 Новое обращение', 'row_position': 0, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'support_my', 'callback_data': 'support_my_tickets', 'text': '📋 Мои обращения', 'row_position': 0, 'column_position': 1, 'button_width': 1},
+                    {'button_id': 'support_faq', 'callback_data': 'support_faq', 'text': '❓ FAQ', 'row_position': 1, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'support_contact', 'callback_data': 'support_contact', 'text': '📞 Контакты', 'row_position': 1, 'column_position': 1, 'button_width': 1},
+                    {'button_id': 'back_to_main', 'callback_data': 'main_menu', 'text': '🏠 Главное меню', 'row_position': 2, 'column_position': 0, 'button_width': 2},
+                ]
+            }
+            
+            # Reset all button configs
+            cursor.execute("DELETE FROM button_configs")
+            logging.info("Reset all existing button configs for re-migration")
+            
+            # Migrate buttons for each menu type
+            for menu_type, button_settings in menu_configs.items():
+                sort_order = 0
+                for button_data in button_settings:
+                    # Get the text from settings or use default
+                    text = get_setting(button_data['button_id']) or button_data['text']
+                    
+                    cursor.execute(
+                        '''
+                        INSERT INTO button_configs (
+                            menu_type, button_id, text, callback_data, row_position, column_position, button_width, sort_order, is_active
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''',
+                        (menu_type, button_data['button_id'], text, button_data['callback_data'], 
+                         button_data['row_position'], button_data['column_position'], button_data['button_width'], sort_order, True)
+                    )
+                    sort_order += 1
+                
+                logging.info(f"Successfully migrated {len(button_settings)} buttons for {menu_type}")
+            
+            # Clean up any duplicates that might have been created
+            cursor.execute("""
+                DELETE FROM button_configs 
+                WHERE id NOT IN (
+                    SELECT MIN(id) 
+                    FROM button_configs 
+                    GROUP BY menu_type, button_id
+                )
+            """)
+            
+            return True
+            
+    except sqlite3.Error as e:
+        logging.error(f"Failed to migrate existing buttons: {e}")
+        return False
+
+def cleanup_duplicate_buttons() -> bool:
+    """Remove duplicate button configurations."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            
+            # Remove duplicates, keeping the first occurrence
+            cursor.execute("""
+                DELETE FROM button_configs 
+                WHERE id NOT IN (
+                    SELECT MIN(id) 
+                    FROM button_configs 
+                    WHERE menu_type = 'main_menu'
+                    GROUP BY button_id
+                )
+            """)
+            
+            deleted_count = cursor.rowcount
+            if deleted_count > 0:
+                logging.info(f"Removed {deleted_count} duplicate button configurations")
+            
+            return True
+            
+    except sqlite3.Error as e:
+        logging.error(f"Failed to cleanup duplicate buttons: {e}")
+        return False
+
+def reset_button_migration() -> bool:
+    """Reset button migration to re-run with correct layout."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            
+            # Delete all existing button configs for all menu types
+            cursor.execute("DELETE FROM button_configs")
+            deleted_count = cursor.rowcount
+            logging.info(f"Deleted {deleted_count} existing button configurations for all menu types")
+            
+            return True
+            
+    except sqlite3.Error as e:
+        logging.error(f"Failed to reset button migration: {e}")
+        return False
+
+def force_button_migration() -> bool:
+    """Force button migration by resetting and re-migrating."""
+    try:
+        logging.info("Starting force button migration...")
+        reset_button_migration()
+        migrate_existing_buttons()
+        logging.info("Force button migration completed successfully")
+        return True
+    except Exception as e:
+        logging.error(f"Error in force button migration: {e}")
+        return False
+
+
+# Resource metrics functions
+def insert_resource_metric(
+    scope: str,
+    object_name: str,
+    *,
+    cpu_percent: float | None = None,
+    mem_percent: float | None = None,
+    disk_percent: float | None = None,
+    load1: float | None = None,
+    net_bytes_sent: int | None = None,
+    net_bytes_recv: int | None = None,
+    raw_json: str | None = None,
+) -> int | None:
+    """Insert a resource metric record."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO resource_metrics (
+                    scope, object_name, cpu_percent, mem_percent, disk_percent, load1,
+                    net_bytes_sent, net_bytes_recv, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    (scope or '').strip(),
+                    (object_name or '').strip(),
+                    cpu_percent, mem_percent, disk_percent, load1,
+                    net_bytes_sent, net_bytes_recv, raw_json,
+                )
+            )
+            conn.commit()
+            return cursor.lastrowid
+    except sqlite3.Error as e:
+        logging.error("Failed to insert resource metric for %s/%s: %s", scope, object_name, e)
+        return None
+
+
+def get_latest_resource_metric(scope: str, object_name: str) -> dict | None:
+    """Get the latest resource metric for a scope/object."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT * FROM resource_metrics
+                WHERE scope = ? AND object_name = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                ''',
+                ((scope or '').strip(), (object_name or '').strip())
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except sqlite3.Error as e:
+        logging.error("Failed to get latest resource metric for %s/%s: %s", scope, object_name, e)
+        return None
+
+
+def get_metrics_series(scope: str, object_name: str, *, since_hours: int = 24, limit: int = 500) -> list[dict]:
+    """Get a series of resource metrics for a scope/object."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Ensure we have at least some data for the requested period
+            if since_hours == 1:
+                hours_filter = 2
+            else:
+                hours_filter = max(1, int(since_hours))
+            
+            cursor.execute(
+                f'''
+                SELECT created_at, cpu_percent, mem_percent, disk_percent, load1
+                FROM resource_metrics
+                WHERE scope = ? AND object_name = ?
+                  AND created_at >= datetime('now', ?)
+                ORDER BY created_at ASC
+                LIMIT ?
+                ''',
+                (
+                    (scope or '').strip(),
+                    (object_name or '').strip(),
+                    f'-{hours_filter} hours',
+                    max(10, int(limit)),
+                )
+            )
+            rows = cursor.fetchall() or []
+            
+            # Debug logging
+            logging.debug(f"get_metrics_series: {scope}/{object_name}, since_hours={since_hours}, found {len(rows)} records")
+            
+            return [dict(r) for r in rows]
+    except sqlite3.Error as e:
+        logging.error("Failed to get metrics series for %s/%s: %s", scope, object_name, e)
+        return []

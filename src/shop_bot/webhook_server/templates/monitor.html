@@ -1,228 +1,1116 @@
 {% extends "base.html" %}
-{% block title %}Монитор ресурсов{% endblock %}
+{% block title %}Мониторинг ресурсов{% endblock %}
 {% block content %}
 <div class="page-header d-print-none">
   <div class="row align-items-center">
     <div class="col">
-      <h2 class="page-title">Монитор ресурсов</h2>
-      <div class="text-secondary">Локальные ресурсы панели и состояние подключённых хостов</div>
+      <h2 class="page-title">📊 Мониторинг системы</h2>
+      <div class="text-secondary">Состояние панели и серверов в реальном времени</div>
+    </div>
+    <div class="col-auto">
+        <div class="btn-group monitor-controls" role="group">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="refresh-all">
+          <i class="fas fa-sync-alt"></i> Обновить все
+        </button>
+      </div>
     </div>
   </div>
+  <div class="hr-text"></div>
 </div>
 
-<div class="row row-cards" id="monitor-root">
-  <!-- Local metrics -->
-  <div class="col-lg-6">
-    <div class="card">
-      <div class="card-header"><h3 class="card-title">Локальные ресурсы (панель)</h3></div>
-      <div class="card-body">
-        <div id="local-error" class="alert alert-danger d-none"></div>
-        <div class="row g-3">
-          <div class="col-12">
-            <div class="d-flex justify-content-between"><div>CPU</div><div><span id="cpu-percent">—</span>%</div></div>
-            <div class="progress">
-              <div id="cpu-bar" class="progress-bar" style="width:0%"></div>
-            </div>
-          </div>
-          <div class="col-12">
-            <div class="d-flex justify-content-between"><div>Память</div><div><span id="mem-used">—</span> / <span id="mem-total">—</span> (<span id="mem-percent">—</span>%)</div></div>
-            <div class="progress">
-              <div id="mem-bar" class="progress-bar bg-purple" style="width:0%"></div>
-            </div>
-          </div>
-          <div class="col-12">
-            <div class="d-flex justify-content-between"><div>Диск</div><div><span id="disk-used">—</span> / <span id="disk-total">—</span> (<span id="disk-percent">—</span>%)</div></div>
-            <div class="progress">
-              <div id="disk-bar" class="progress-bar bg-green" style="width:0%"></div>
-            </div>
-          </div>
-          <div class="col-12">
-            <div class="small text-secondary">Load average: <span id="loadavg">—</span> · Uptime: <span id="uptime">—</span></div>
-          </div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card stat-card">
+      <div class="card-body text-center">
+        <div class="stat-icon mb-2">
+          <i class="fas fa-microchip text-primary"></i>
         </div>
+        <div class="stat-value" id="cpu-stat">—</div>
+        <div class="stat-label">Процессор</div>
+        <div class="stat-trend" id="cpu-trend"></div>
       </div>
     </div>
   </div>
-
-  <!-- Hosts metrics -->
-  <div class="col-lg-6">
-    <div class="card">
-      <div class="card-header d-flex align-items-center justify-content-between">
-        <h3 class="card-title">Хосты (SSH)</h3>
-        <button class="btn btn-outline-secondary btn-sm" id="refresh-hosts">Обновить</button>
-      </div>
-      <div class="card-body">
-        <div id="hosts-error" class="alert alert-warning d-none"></div>
-        <div class="table-responsive">
-          <table class="table table-vcenter">
-            <thead>
-              <tr>
-                <th>Хост</th>
-                <th class="text-nowrap">CPU</th>
-                <th class="text-nowrap">Load</th>
-                <th class="text-nowrap">Память</th>
-                <th class="text-nowrap">Диск</th>
-                <th>Uptime</th>
-              </tr>
-            </thead>
-            <tbody id="hosts-tbody">
-              <tr><td colspan="6" class="text-secondary">Загрузка…</td></tr>
-            </tbody>
-          </table>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card">
+      <div class="card-body text-center">
+        <div class="stat-icon mb-2">
+          <i class="fas fa-memory text-success"></i>
         </div>
-        <div class="small text-secondary">Показываются только хосты с настроенным SSH в разделе «Настройки → Управление хостами».</div>
+        <div class="stat-value" id="memory-stat">—</div>
+        <div class="stat-label">Память</div>
+        <div class="stat-trend" id="memory-trend"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card">
+      <div class="card-body text-center">
+        <div class="stat-icon mb-2">
+          <i class="fas fa-hdd text-warning"></i>
+        </div>
+        <div class="stat-value" id="disk-stat">—</div>
+        <div class="stat-label">Диск</div>
+        <div class="stat-trend" id="disk-trend"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card">
+      <div class="card-body text-center">
+        <div class="stat-icon mb-2">
+          <i class="fas fa-network-wired text-info"></i>
+        </div>
+        <div class="stat-value" id="network-stat">—</div>
+        <div class="stat-label">Сеть</div>
+        <div class="stat-trend" id="network-trend"></div>
       </div>
     </div>
   </div>
 </div>
 
 
-<!-- Metrics charts -->
-<div class="card mt-3" id="metrics-card">
-  <div class="card-header d-flex align-items-center gap-2 flex-wrap">
-    <h3 class="card-title me-auto">Графики метрик</h3>
-    <select id="mh-host" class="form-select form-select-sm" style="max-width:220px"></select>
-    <select id="mh-metric" class="form-select form-select-sm" style="max-width:180px">
-      <option value="cpu_percent">CPU %</option>
-      <option value="mem_percent">RAM %</option>
-      <option value="disk_percent">Disk %</option>
-    </select>
-    <select id="mh-range" class="form-select form-select-sm" style="max-width:140px">
-      <option value="60" selected>60 точек</option>
-      <option value="120">120 точек</option>
-      <option value="240">240 точек</option>
-    </select>
-    <button id="mh-refresh" class="btn btn-outline-primary btn-sm">Обновить</button>
+<div class="row g-3">
+  <div class="col-12 col-lg-8">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h3 class="card-title mb-0">
+          <i class="fas fa-chart-line text-primary me-2"></i>
+          График производительности
+        </h3>
+        <div class="btn-group btn-group-sm" role="group">
+          <input type="radio" class="btn-check" name="chart-period" id="period-1h" value="1" checked>
+          <label class="btn btn-outline-primary" for="period-1h">1ч</label>
+          <input type="radio" class="btn-check" name="chart-period" id="period-6h" value="6">
+          <label class="btn btn-outline-primary" for="period-6h">6ч</label>
+          <input type="radio" class="btn-check" name="chart-period" id="period-24h" value="24">
+          <label class="btn btn-outline-primary" for="period-24h">24ч</label>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="chart-container">
+          <canvas id="main-chart" height="300"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-4">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title mb-0" id="local-panel-header">
+          <i class="fas fa-server text-success me-2"></i>
+          Текущий сервер
+        </h3>
+      </div>
+      <div class="card-body">
+        <div id="local-metrics" class="monitor-details">Загрузка…</div>
+        <div class="mt-3">
+          <canvas id="local-mini-chart" height="120"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<div class="row g-3 mt-3">
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h3 class="card-title mb-0">
+          <i class="fas fa-server text-info me-2"></i>
+          Серверы (xui_hosts)
+        </h3>
+        <span class="badge bg-primary" id="hosts-count">{{ hosts|length }}</span>
+      </div>
+      <div class="card-body">
+        {% if hosts %}
+          <div class="servers-list">
+          {% for h in hosts %}
+            <div class="server-item" data-host="{{ h.host_name }}">
+              <div class="server-header">
+                <div class="server-info">
+                  <div class="server-name">
+                    <i class="fas fa-server me-2"></i>
+                    {{ h.host_name }}
+                    <span class="text-muted small ms-2">{{ h.host_url or 'URL не указан' }}</span>
+                  </div>
+                </div>
+                <div class="server-status">
+                  <div class="status-indicator" id="host-status-{{ loop.index }}"></div>
+                  <button class="btn btn-outline-primary btn-sm server-item" data-host="{{ h.host_name }}" data-target="#host-{{ loop.index }}">
+                    <i class="fas fa-sync-alt"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="server-metrics" id="host-{{ loop.index }}">
+                <div class="loading-spinner">
+                  <i class="fas fa-spinner fa-spin"></i> Загрузка...
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty-state">
+            <i class="fas fa-server text-muted mb-3"></i>
+            <p class="text-muted">Хосты не добавлены</p>
+          </div>
+        {% endif %}
+    </div>
+  </div>
+</div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h3 class="card-title mb-0">
+          <i class="fas fa-terminal text-warning me-2"></i>
+          SSH-цели
+        </h3>
+        <span class="badge bg-warning" id="targets-count">{{ ssh_targets|length }}</span>
   </div>
   <div class="card-body">
-    <div class="chart" style="height: 300px">
-      <canvas id="mh-canvas"></canvas>
+        {% if ssh_targets %}
+          <div class="servers-list">
+          {% for t in ssh_targets %}
+            <div class="server-item" data-target="{{ t.target_name }}">
+              <div class="server-header">
+                <div class="server-info">
+                  <div class="server-name">
+                    <i class="fas fa-terminal me-2"></i>
+                    {{ t.target_name }}
+                  </div>
+                  <div class="server-url text-muted small">{{ t.ssh_host }}:{{ t.ssh_port or 22 }}</div>
+                </div>
+                <div class="server-status">
+                  <div class="status-indicator" id="target-status-{{ loop.index }}"></div>
+                  <button class="btn btn-outline-warning btn-sm ssh-target" data-target-name="{{ t.target_name }}" data-target="#target-{{ loop.index }}">
+                    <i class="fas fa-sync-alt"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="server-metrics" id="target-{{ loop.index }}">
+                <div class="loading-spinner">
+                  <i class="fas fa-spinner fa-spin"></i> Загрузка...
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty-state">
+            <i class="fas fa-terminal text-muted mb-3"></i>
+            <p class="text-muted">SSH-цели не добавлены</p>
+          </div>
+        {% endif %}
+      </div>
     </div>
   </div>
-</div><script>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
 (function(){
-  const CPU_WARN=85, MEM_WARN=85, DISK_WARN=90;
-  const fmtBytes = (v)=>{
-    if (v == null) return '—';
-    const units = ['Б','КБ','МБ','ГБ','ТБ'];
-    let i=0, n=Number(v);
-    while(n >= 1024 && i < units.length-1){ n/=1024; i++; }
-    return n.toFixed(n>=10?0:1)+' '+units[i];
-  };
-  const fmtLoad = (l)=> l && l['1m']!=null ? `${l['1m'].toFixed(2)} / ${l['5m'].toFixed(2)} / ${l['15m'].toFixed(2)}` : '—';
-  const fmtUptime = (s)=>{
-    if (!s && s!==0) return '—';
-    const d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60);
-    const parts=[]; if(d) parts.push(d+'д'); if(h) parts.push(h+'ч'); parts.push(m+'м');
+  // Глобальные переменные
+  let mainChart = null;
+  let localMiniChart = null;
+  let autoRefreshInterval = null;
+  let currentPeriod = 1; // часы
+  
+  // Переменные для отслеживания скорости сети
+  let lastNetworkData = null;
+  let lastNetworkTime = null;
+  
+  // Ключи для localStorage
+  const NETWORK_DATA_KEY = 'monitor_network_data';
+  const NETWORK_TIME_KEY = 'monitor_network_time';
+
+  // Утилиты
+  async function fetchJSON(url){
+    try {
+      const resp = await fetch(url, { credentials: 'same-origin' });
+      return await resp.json();
+    } catch(e){ 
+      return { ok: false, error: String(e) };
+    }
+  }
+
+  function fmtBytes(n){ 
+    if(n==null) return '—';
+    const units=['B','KB','MB','GB','TB']; 
+    let i=0, x=Number(n); 
+    while(x>=1024 && i<units.length-1){ x/=1024; i++; }
+    return x.toFixed(1)+' '+units[i];
+  }
+
+  function fmtPct(x){ 
+    return (x==null)?'—':(Number(x).toFixed(1)+'%'); 
+  }
+
+  function secsToDHMS(s){ 
+    if(!s&&s!==0) return '—'; 
+    s=Number(s);
+    const d=Math.floor(s/86400); s%=86400; 
+    const h=Math.floor(s/3600); s%=3600; 
+    const m=Math.floor(s/60); 
+    const sec=s%60;
+    const parts=[]; 
+    if(d) parts.push(d+'д'); 
+    if(h) parts.push(h+'ч'); 
+    if(m) parts.push(m+'м'); 
+    if(sec && parts.length===0) parts.push(sec+'с');
     return parts.join(' ');
-  };
+  }
 
-  async function loadLocal(){
-    const errBox = document.getElementById('local-error');
-    try{
-      const r = await fetch("{{ url_for('monitor_local_json') }}", {headers:{'Accept':'application/json'}});
-      const j = await r.json();
-      if(!j.ok){ throw new Error(j.error||'error'); }
-      errBox.classList.add('d-none');
-      document.getElementById('cpu-percent').textContent = j.cpu_percent!=null? j.cpu_percent.toFixed(0) : '—';
-      document.getElementById('cpu-bar').style.width = (j.cpu_percent||0)+'%';
-      document.getElementById('mem-used').textContent = fmtBytes(j.mem_used);
-      document.getElementById('mem-total').textContent = fmtBytes(j.mem_total);
-      document.getElementById('mem-percent').textContent = j.mem_percent!=null? j.mem_percent.toFixed(0):'—';
-      document.getElementById('mem-bar').style.width = (j.mem_percent||0)+'%';
-      document.getElementById('disk-used').textContent = fmtBytes(j.disk_used);
-      document.getElementById('disk-total').textContent = fmtBytes(j.disk_total);
-      document.getElementById('disk-percent').textContent = j.disk_percent!=null? j.disk_percent.toFixed(0):'—';
-      document.getElementById('disk-bar').style.width = (j.disk_percent||0)+'%';
-      document.getElementById('loadavg').textContent = fmtLoad(j.loadavg);
-      document.getElementById('uptime').textContent = fmtUptime(j.uptime_seconds);
-    }catch(e){
-      errBox.textContent = 'Не удалось получить локальные метрики: '+e;
-      errBox.classList.remove('d-none');
+  function getStatusColor(value, thresholds = { warning: 70, critical: 90 }) {
+    if (value == null) return 'text-muted';
+    if (value >= thresholds.critical) return 'text-danger';
+    if (value >= thresholds.warning) return 'text-warning';
+    return 'text-success';
+  }
+
+  function getStatusIndicator(value, thresholds = { warning: 70, critical: 90 }) {
+    if (value == null) return 'bg-secondary';
+    if (value >= thresholds.critical) return 'bg-danger pulse';
+    if (value >= thresholds.warning) return 'bg-warning';
+    return 'bg-success';
+  }
+
+  // Функция для вычисления скорости сети
+  function calculateNetworkSpeed(currentData, sourceId = 'default') {
+    const now = Date.now();
+    
+    // Отладочная информация
+    console.log(`calculateNetworkSpeed для ${sourceId}:`, {
+      currentData: currentData,
+      bytes_sent: currentData.bytes_sent,
+      bytes_recv: currentData.bytes_recv
+    });
+    
+    // Создаем уникальные ключи для каждого источника
+    const dataKey = `${NETWORK_DATA_KEY}_${sourceId}`;
+    const timeKey = `${NETWORK_TIME_KEY}_${sourceId}`;
+    
+    // Загружаем предыдущие данные из localStorage
+    try {
+      const savedData = localStorage.getItem(dataKey);
+      const savedTime = localStorage.getItem(timeKey);
+      
+      if (savedData && savedTime) {
+        lastNetworkData = JSON.parse(savedData);
+        lastNetworkTime = parseInt(savedTime);
+      }
+    } catch (e) {
+      console.warn('Ошибка загрузки данных сети из localStorage:', e);
+    }
+    
+    if (!lastNetworkData || !lastNetworkTime) {
+      console.log(`Нет предыдущих данных для ${sourceId}, сохраняем текущие как начальную точку`);
+      // Сохраняем текущие данные как начальную точку
+      lastNetworkData = currentData;
+      lastNetworkTime = now;
+      
+      try {
+        localStorage.setItem(dataKey, JSON.stringify(currentData));
+        localStorage.setItem(timeKey, now.toString());
+      } catch (e) {
+        console.warn('Ошибка сохранения данных сети в localStorage:', e);
+      }
+      
+      return { upSpeed: 0, downSpeed: 0, totalSpeed: 0 };
+    }
+    
+    const timeDiff = (now - lastNetworkTime) / 1000; // секунды
+    if (timeDiff < 1) {
+      console.log(`Время между обновлениями слишком мало для ${sourceId}: ${timeDiff}с`);
+      return { upSpeed: 0, downSpeed: 0, totalSpeed: 0 };
+    }
+    
+    const bytesUpDiff = (currentData.bytes_sent || 0) - (lastNetworkData.bytes_sent || 0);
+    const bytesDownDiff = (currentData.bytes_recv || 0) - (lastNetworkData.bytes_recv || 0);
+    
+    const upSpeed = Math.max(0, bytesUpDiff / timeDiff);
+    const downSpeed = Math.max(0, bytesDownDiff / timeDiff);
+    const totalSpeed = upSpeed + downSpeed;
+    
+    console.log(`Скорость вычислена для ${sourceId}:`, {
+      timeDiff: timeDiff,
+      bytesUpDiff: bytesUpDiff,
+      bytesDownDiff: bytesDownDiff,
+      upSpeed: upSpeed,
+      downSpeed: downSpeed,
+      totalSpeed: totalSpeed
+    });
+    
+    // Сохраняем новые данные
+    lastNetworkData = currentData;
+    lastNetworkTime = now;
+    
+    try {
+      localStorage.setItem(dataKey, JSON.stringify(currentData));
+      localStorage.setItem(timeKey, now.toString());
+    } catch (e) {
+      console.warn('Ошибка сохранения данных сети в localStorage:', e);
+    }
+    
+    return { upSpeed, downSpeed, totalSpeed };
+  }
+
+  // Обновление статистических карточек
+  function updateStatsCards(data) {
+    if (!data || !data.ok) return;
+
+    // Определяем тип данных (локальные или удаленные)
+    const isRemote = data.uname !== undefined; // удаленные данные имеют поле uname
+    
+    let cpu, mem, disk, net;
+    
+    if (isRemote) {
+      // Данные удаленного сервера
+      cpu = { percent: data.cpu_percent || 0, count_logical: data.cpu_count || '—' };
+      mem = { 
+        percent: data.memory_percent || 0, 
+        used: (data.memory_used_mb || 0) * 1024 * 1024, // конвертируем МБ в байты
+        total: (data.memory_total_mb || 0) * 1024 * 1024
+      };
+      disk = { percent: data.disk_percent || 0, mountpoint: data.disk_mountpoint || '/' };
+      net = { 
+        bytes_sent: data.network_sent || 0, 
+        bytes_recv: data.network_recv || 0,
+        packets_sent: data.network_packets_sent || 0,
+        packets_recv: data.network_packets_recv || 0
+      };
+    } else {
+      // Локальные данные - используем правильные поля из API
+      cpu = {
+        percent: data.cpu_percent || 0,
+        count_logical: data.cpu_count || '—'
+      };
+      mem = {
+        percent: data.mem_percent || 0,
+        used: data.mem_used || 0,
+        total: data.mem_total || 0
+      };
+      
+      // Используем общий процент диска для согласованности с графиком
+      const diskPercent = data.disk_percent !== undefined ? data.disk_percent : 0;
+      disk = { 
+        percent: diskPercent, 
+        mountpoint: data.disk_mountpoint || '/',
+        used: data.disk_used || 0,
+        total: data.disk_total || 0
+      };
+      
+      // Отладочная информация для диска
+      console.log('Данные диска:', {
+        disk_percent: data.disk_percent,
+        disk_used: data.disk_used,
+        disk_total: data.disk_total,
+        final_disk_percent: diskPercent
+      });
+      
+      // Сетевые данные - для локальных данных используем поля из psutil
+      net = {
+        bytes_sent: data.network_sent || 0,
+        bytes_recv: data.network_recv || 0,
+        packets_sent: data.network_packets_sent || 0,
+        packets_recv: data.network_packets_recv || 0
+      };
+      
+      // Отладочная информация для сети
+      console.log('Сетевые данные (локальные):', {
+        network_sent: data.network_sent,
+        network_recv: data.network_recv,
+        network_packets_sent: data.network_packets_sent,
+        network_packets_recv: data.network_packets_recv,
+        net: net
+      });
+    }
+
+    // Процессор
+    document.getElementById('cpu-stat').innerHTML = `
+      <span class="${getStatusColor(cpu.percent)}">${fmtPct(cpu.percent)}</span>
+    `;
+    document.getElementById('cpu-trend').innerHTML = `
+      <small class="text-muted">${cpu.count_logical || '—'} ядер</small>
+    `;
+
+    // Память
+    document.getElementById('memory-stat').innerHTML = `
+      <span class="${getStatusColor(mem.percent)}">${fmtPct(mem.percent)}</span>
+    `;
+    document.getElementById('memory-trend').innerHTML = `
+      <small class="text-muted">${fmtBytes(mem.used || 0)} / ${fmtBytes(mem.total || 0)}</small>
+    `;
+
+    // Диск
+    document.getElementById('disk-stat').innerHTML = `
+      <span class="${getStatusColor(disk.percent)}">${fmtPct(disk.percent)}</span>
+    `;
+    document.getElementById('disk-trend').innerHTML = `
+      <small class="text-muted">${disk.mountpoint || '—'}</small>
+    `;
+
+    // Сеть - вычисляем скорость
+    console.log('Данные сети для карточек:', {
+      isRemote: isRemote,
+      net: net,
+      rawData: data
+    });
+    
+    // Для карточек используем уже вычисленную скорость из детальной информации
+    // если она доступна, иначе вычисляем самостоятельно
+    let networkSpeed;
+    if (window.lastCalculatedNetworkSpeed && window.lastCalculatedNetworkSpeed.sourceId !== 'stats_cards') {
+      console.log('Используем скорость из детальной информации для карточек');
+      networkSpeed = window.lastCalculatedNetworkSpeed.speed;
+    } else {
+      networkSpeed = calculateNetworkSpeed(net, 'stats_cards');
+    }
+    
+    // Сохраняем вычисленную скорость для возможного использования другими компонентами
+    window.lastCalculatedNetworkSpeed = {
+      sourceId: 'stats_cards',
+      speed: networkSpeed,
+      timestamp: Date.now()
+    };
+    const netUp = fmtBytes(net.bytes_sent || 0);
+    const netDown = fmtBytes(net.bytes_recv || 0);
+    const netPackets = (net.packets_sent || 0) + (net.packets_recv || 0);
+    const netTotal = (net.bytes_sent || 0) + (net.bytes_recv || 0);
+    const netTotalFormatted = fmtBytes(netTotal);
+    
+    // Отладочная информация
+    console.log('Сетевые данные (карточки):', {
+      source: 'stats_cards',
+      bytes_sent: net.bytes_sent,
+      bytes_recv: net.bytes_recv,
+      packets_sent: net.packets_sent,
+      packets_recv: net.packets_recv,
+      speed: networkSpeed,
+      speedUp: fmtBytes(networkSpeed.upSpeed),
+      speedDown: fmtBytes(networkSpeed.downSpeed),
+      speedTotal: fmtBytes(networkSpeed.totalSpeed)
+    });
+    
+    // Отображаем текущую скорость
+    const speedUp = fmtBytes(networkSpeed.upSpeed) + '/с';
+    const speedDown = fmtBytes(networkSpeed.downSpeed) + '/с';
+    const speedTotal = fmtBytes(networkSpeed.totalSpeed) + '/с';
+    
+    document.getElementById('network-stat').innerHTML = `
+      <span class="text-info">${speedTotal}</span>
+    `;
+    document.getElementById('network-trend').innerHTML = `
+      <small class="text-muted">↑${speedUp} ↓${speedDown}</small>
+      <br><small class="text-muted">📦 ${netPackets.toLocaleString()} пакетов</small>
+    `;
+  }
+
+  // Рендеринг локальных метрик
+  function renderLocal(el, data){
+    if(!data || !data.ok){ 
+      el.innerHTML = '<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i>'+(data && data.error ? data.error : 'Ошибка')+'</div>'; 
+      return; 
+    }
+    
+    // Преобразуем данные в нужный формат
+    const cpu = {
+      percent: data.cpu_percent || 0,
+      count_logical: data.cpu_count || '—',
+      count_physical: Math.floor((data.cpu_count || 1) / 2) || '—'
+    };
+    const mem = {
+      percent: data.mem_percent || 0,
+      used: data.mem_used || 0,
+      total: data.mem_total || 0,
+      available: data.mem_available || 0
+    };
+    const sw = data.swap || {}; 
+    const net = data.net || {};
+    
+    // Вычисляем скорость сети
+    const networkSpeed = calculateNetworkSpeed(net, 'local_details');
+    
+    // Сохраняем вычисленную скорость для карточек
+    window.lastCalculatedNetworkSpeed = {
+      sourceId: 'local_details',
+      speed: networkSpeed,
+      timestamp: Date.now()
+    };
+    
+    // Отладочная информация для локальных данных
+    console.log('Локальные сетевые данные (детали):', {
+      source: 'local_details',
+      bytes_sent: net.bytes_sent,
+      bytes_recv: net.bytes_recv,
+      packets_sent: net.packets_sent,
+      packets_recv: net.packets_recv,
+      speed: networkSpeed
+    });
+    
+    // Показываем информацию о диске из API
+    const diskPercent = data.disk_percent || 0;
+    const diskUsed = data.disk_used || 0;
+    const diskTotal = data.disk_total || 0;
+    
+    const disks = `
+      <div class="disk-item d-flex justify-content-between align-items-center py-1">
+        <span class="text-muted small">${data.disk_mountpoint || '/'}</span>
+        <div class="d-flex align-items-center gap-2">
+          <div class="progress" style="width: 60px; height: 6px;">
+            <div class="progress-bar ${getStatusColor(diskPercent, { warning: 80, critical: 95 }).replace('text-', 'bg-')}" 
+                 style="width: ${diskPercent}%"></div>
+          </div>
+          <span class="small ${getStatusColor(diskPercent)}">${fmtPct(diskPercent)}</span>
+        </div>
+      </div>
+    `;
+
+    el.innerHTML = `
+      <div class="monitor-info">
+        <div class="info-item">
+          <i class="fas fa-server text-primary me-2"></i>
+          <strong>${data.source || 'Локальная панель'}</strong>
+          <span class="text-muted small">(${data.platform || 'Linux'})</span>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-clock text-info me-2"></i>
+          <span>Время работы: ${secsToDHMS(data.uptime_seconds || 0)}</span>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-microchip text-primary me-2"></i>
+          <span>Процессор: <span class="${getStatusColor(cpu.percent)}">${fmtPct(cpu.percent)}</span></span>
+          <small class="text-muted">(${cpu.count_logical||'—'} логич, ${cpu.count_physical||'—'} физич)</small>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-memory text-success me-2"></i>
+          <span>Память: <span class="${getStatusColor(mem.percent)}">${fmtPct(mem.percent)}</span></span>
+          <small class="text-muted">${fmtBytes(mem.used||0)} / ${fmtBytes(mem.total||0)}</small>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-hdd text-warning me-2"></i>
+          <span>Диск: <span class="${getStatusColor(diskPercent)}">${fmtPct(diskPercent)}</span></span>
+          <small class="text-muted">${fmtBytes(diskUsed)} / ${fmtBytes(diskTotal)}</small>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-exchange-alt text-info me-2"></i>
+          <span>Сеть: ↑${fmtBytes(net.bytes_sent||0)} ↓${fmtBytes(net.bytes_recv||0)}</span>
+          <small class="text-muted">(${(net.packets_sent||0) + (net.packets_recv||0)} пакетов)</small>
+          <br><small class="text-info">Скорость: ↑${fmtBytes(networkSpeed.upSpeed)}/с ↓${fmtBytes(networkSpeed.downSpeed)}/с</small>
+        </div>
+      </div>
+      <div class="disks-section mt-3">
+        <h6 class="text-muted mb-2">Диск:</h6>
+        ${disks}
+      </div>`;
+  }
+
+  // Рендеринг удаленных метрик
+  function renderRemote(el, data){
+    if(!data || !data.ok){ 
+      el.innerHTML = '<div class="alert alert-danger"><i class="fas fa-exclamation-triangle me-2"></i>'+(data && data.error ? data.error : 'Ошибка')+'</div>'; 
+      return; 
+    }
+    
+    // Обрабатываем данные удаленного сервера
+    const cpu = { percent: data.cpu_percent || 0, count_logical: data.cpu_count || '—' };
+    const mem = { 
+      percent: data.memory_percent || 0, 
+      used_mb: data.memory_used_mb || 0,
+      total_mb: data.memory_total_mb || 0
+    };
+    const disk = { percent: data.disk_percent || 0, mountpoint: data.disk_mountpoint || '/' };
+    const net = { 
+      bytes_sent: data.network_sent || 0, 
+      bytes_recv: data.network_recv || 0,
+      packets_sent: data.network_packets_sent || 0,
+      packets_recv: data.network_packets_recv || 0
+    };
+    
+    // Вычисляем скорость сети
+    const networkSpeed = calculateNetworkSpeed(net, 'remote_details');
+    
+    // Сохраняем вычисленную скорость для карточек
+    window.lastCalculatedNetworkSpeed = {
+      sourceId: 'remote_details',
+      speed: networkSpeed,
+      timestamp: Date.now()
+    };
+    
+    // Отладочная информация для удаленных данных
+    console.log('Удаленные сетевые данные (детали):', {
+      source: 'remote_details',
+      bytes_sent: net.bytes_sent,
+      bytes_recv: net.bytes_recv,
+      packets_sent: net.packets_sent,
+      packets_recv: net.packets_recv,
+      speed: networkSpeed
+    });
+    
+    const disks = `
+      <div class="disk-item d-flex justify-content-between align-items-center py-1">
+        <span class="text-muted small">${disk.mountpoint}</span>
+        <div class="d-flex align-items-center gap-2">
+          <div class="progress" style="width: 60px; height: 6px;">
+            <div class="progress-bar ${getStatusColor(disk.percent, { warning: 80, critical: 95 }).replace('text-', 'bg-')}" 
+                 style="width: ${disk.percent || 0}%"></div>
+          </div>
+          <span class="small ${getStatusColor(disk.percent)}">${fmtPct(disk.percent)}</span>
+        </div>
+      </div>
+    `;
+
+    el.innerHTML = `
+      <div class="monitor-info">
+        <div class="info-item">
+          <i class="fas fa-terminal text-warning me-2"></i>
+          <strong>${data.uname||'—'}</strong>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-clock text-info me-2"></i>
+          <span>Время работы: ${secsToDHMS(data.uptime_sec)}</span>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-microchip text-primary me-2"></i>
+          <span>Процессор: <span class="${getStatusColor(cpu.percent)}">${fmtPct(cpu.percent)}</span></span>
+          <small class="text-muted">(${cpu.count_logical} ядер)</small>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-chart-line text-primary me-2"></i>
+          <span>Средняя загрузка: ${data.loadavg ? `${data.loadavg['1m'] || '—'}, ${data.loadavg['5m'] || '—'}, ${data.loadavg['15m'] || '—'}` : '—'}</span>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-memory text-success me-2"></i>
+          <span>Память: <span class="${getStatusColor(mem.percent)}">${fmtPct(mem.percent)}</span></span>
+          <small class="text-muted">${mem.used_mb||'—'} / ${mem.total_mb||'—'} МБ</small>
+        </div>
+        <div class="info-item">
+          <i class="fas fa-exchange-alt text-warning me-2"></i>
+          <span>Сеть: ↑${fmtBytes(net.bytes_sent||0)} ↓${fmtBytes(net.bytes_recv||0)}</span>
+          <small class="text-muted">(${(net.packets_sent||0) + (net.packets_recv||0)} пакетов)</small>
+          <br><small class="text-info">Скорость: ↑${fmtBytes(networkSpeed.upSpeed)}/с ↓${fmtBytes(networkSpeed.downSpeed)}/с</small>
+        </div>
+      </div>
+      <div class="disks-section mt-3">
+        <h6 class="text-muted mb-2">Диски:</h6>
+        ${disks}
+      </div>`;
+  }
+
+  // Создание основного графика
+  function createMainChart() {
+    const ctx = document.getElementById('main-chart');
+    if (!ctx) return null;
+
+    const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 300);
+    gradient.addColorStop(0, 'rgba(174, 62, 201, 0.1)');
+    gradient.addColorStop(1, 'rgba(174, 62, 201, 0.01)');
+
+    mainChart = new Chart(ctx, {
+      type: 'line',
+      data: { 
+        labels: [], 
+        datasets: [
+          { 
+            label: 'Процессор %', 
+            data: [], 
+            borderColor: '#ae3ec9', 
+            backgroundColor: 'rgba(174, 62, 201, 0.1)',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: true,
+            pointRadius: 0,
+            pointHoverRadius: 6
+          },
+          { 
+            label: 'Память %', 
+            data: [], 
+            borderColor: '#51cf66', 
+            backgroundColor: 'rgba(81, 207, 102, 0.1)',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: true,
+            pointRadius: 0,
+            pointHoverRadius: 6
+          },
+          { 
+            label: 'Диск %', 
+            data: [], 
+            borderColor: '#ff922b', 
+            backgroundColor: 'rgba(255, 146, 43, 0.1)',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: true,
+            pointRadius: 0,
+            pointHoverRadius: 6
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          intersect: false,
+          mode: 'index'
+        },
+        plugins: { 
+          legend: { 
+            position: 'top',
+            labels: {
+              usePointStyle: true,
+              padding: 20
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            titleColor: '#fff',
+            bodyColor: '#fff',
+            borderColor: 'rgba(255, 255, 255, 0.1)',
+            borderWidth: 1,
+            cornerRadius: 8
+          }
+        },
+        scales: { 
+          x: {
+            grid: {
+              color: 'rgba(255, 255, 255, 0.05)'
+            },
+            ticks: {
+              color: 'rgba(255, 255, 255, 0.7)'
+            }
+          },
+          y: { 
+            suggestedMin: 0, 
+            suggestedMax: 100, 
+            grid: {
+              color: 'rgba(255, 255, 255, 0.05)'
+            },
+            ticks: { 
+              color: 'rgba(255, 255, 255, 0.7)',
+              callback: (v) => v + '%' 
+            } 
+          } 
+        },
+        animation: {
+          duration: 1000,
+          easing: 'easeInOutQuart'
+        }
+      }
+    });
+    return mainChart;
+  }
+
+  // Создание мини-графика
+  function createLocalMiniChart() {
+    const ctx = document.getElementById('local-mini-chart');
+    if (!ctx) return null;
+
+    localMiniChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Процессор', 'Память', 'Диск'],
+        datasets: [{
+          data: [0, 0, 0],
+          backgroundColor: [
+            'rgba(174, 62, 201, 0.8)',
+            'rgba(81, 207, 102, 0.8)',
+            'rgba(255, 146, 43, 0.8)'
+          ],
+          borderColor: [
+            '#ae3ec9',
+            '#51cf66',
+            '#ff922b'
+          ],
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              usePointStyle: true,
+              padding: 10
+            }
+          }
+        },
+        cutout: '60%'
+      }
+    });
+    return localMiniChart;
+  }
+
+  // Обновление графиков
+  async function refreshCharts() {
+    try {
+      // Получаем исторические данные для локальной панели
+      const data = await fetchJSON(`{{ url_for('monitor_metrics_json', scope='local', object_name='panel') }}?since_hours=${currentPeriod}&limit=200`);
+      
+      if (data && data.ok && data.items && data.items.length > 0) {
+        const items = data.items;
+        const labels = items.map(item => {
+          const date = new Date(item.created_at);
+          return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        });
+        
+        const cpuData = items.map(item => item.cpu_percent || 0);
+        const memData = items.map(item => item.mem_percent || 0);
+        const diskData = items.map(item => item.disk_percent || 0);
+        
+        if (mainChart) {
+          mainChart.data.labels = labels;
+          mainChart.data.datasets[0].data = cpuData;
+          mainChart.data.datasets[1].data = memData;
+          mainChart.data.datasets[2].data = diskData;
+          mainChart.update('none');
+        }
+      } else {
+        // Показываем сообщение об отсутствии данных
+        if (mainChart) {
+          mainChart.data.labels = ['Нет данных'];
+          mainChart.data.datasets[0].data = [0];
+          mainChart.data.datasets[1].data = [0];
+          mainChart.data.datasets[2].data = [0];
+          mainChart.update('none');
+        }
+      }
+    } catch (e) {
+      console.error('Ошибка загрузки данных для графика:', e);
+      if (mainChart) {
+        mainChart.data.labels = ['Ошибка загрузки'];
+        mainChart.data.datasets[0].data = [0];
+        mainChart.data.datasets[1].data = [0];
+        mainChart.data.datasets[2].data = [0];
+        mainChart.update('none');
+      }
     }
   }
 
-  function renderHostRow(m){
-    const ok = !!m.ok;
-    const cpu = m.cpu_count? m.loadavg && m.loadavg['1m']!=null ? Math.min(100, (m.loadavg['1m']/m.cpu_count)*100) : null : null;
-    return `<tr>
-      <td class="text-nowrap">${m.host_name||'—'} ${ok? '': '<span class="badge bg-red-lt ms-1">ошибка</span>'}</td>
-      <td>${cpu!=null? cpu.toFixed(0)+'%':'—'}</td>
-      <td>${fmtLoad(m.loadavg)}</td>
-      <td>${fmtBytes(m.mem_used)} / ${fmtBytes(m.mem_total)}</td>
-      <td>${fmtBytes(m.disk_used)} / ${fmtBytes(m.disk_total)}</td>
-      <td>${fmtUptime(m.uptime_seconds)}</td>
-    </tr>`;
+  // Обновление локальных метрик
+  async function refreshLocal() {
+    const el = document.getElementById('local-metrics');
+    const data = await fetchJSON("{{ url_for('monitor_local_json') }}");
+    renderLocal(el, data);
+    updateStatsCards(data);
   }
 
-  async function loadHosts(){
-    const err = document.getElementById('hosts-error');
-    const tb = document.getElementById('hosts-tbody');
-    try{
-      const r = await fetch("{{ url_for('monitor_hosts_json') }}", {headers:{'Accept':'application/json'}});
-      const j = await r.json();
-      if(!j.ok){ throw new Error(j.error||'error'); }
-      err.classList.add('d-none');
-      const items = j.items||[];
-      if(!items.length){ tb.innerHTML = '<tr><td colspan="6" class="text-secondary">Нет хостов с настроенным SSH</td></tr>'; return; }
-      tb.innerHTML = items.map(renderHostRow).join('');
-    }catch(e){
-      err.textContent = 'Не удалось получить метрики хостов: '+e;
-      err.classList.remove('d-none');
-      tb.innerHTML = '<tr><td colspan="6" class="text-secondary">Ошибка загрузки</td></tr>';
+  // Обновление списка хостов
+  function updateHostsList(hosts) {
+    hosts.forEach((host, index) => {
+      const hostElement = document.querySelector(`[data-host="${host.host_name}"]`);
+      if (hostElement) {
+        const metricsElement = hostElement.querySelector('.server-metrics');
+        const statusElement = hostElement.querySelector('.status-indicator');
+
+        // Унифицируем поля метрик (поддержка как вложенных, так и плоских структур)
+        const cpuPct = (host.cpu && typeof host.cpu.percent === 'number') ? host.cpu.percent : (host.cpu_percent ?? 0);
+        const memPct = (host.mem && typeof host.mem.percent === 'number') ? host.mem.percent : (host.mem_percent ?? 0);
+        const diskPct = (host.disk && typeof host.disk.percent === 'number') ? host.disk.percent : (host.disk_percent ?? 0);
+        const uptimeSec = host.uptime_seconds ?? 0;
+
+        if (metricsElement) {
+          if (host.ok) {
+            // Хост работает - показываем метрики
+            metricsElement.innerHTML = `
+              <div class="row">
+                <div class="col-6">
+                  <div class="metric-item">
+                    <span class="metric-label">CPU:</span>
+                    <span class="metric-value ${getStatusColor(cpuPct)}">${fmtPct(cpuPct)}</span>
+                  </div>
+                  <div class="metric-item">
+                    <span class="metric-label">RAM:</span>
+                    <span class="metric-value ${getStatusColor(memPct)}">${fmtPct(memPct)}</span>
+                  </div>
+                </div>
+                <div class="col-6">
+                  <div class="metric-item">
+                    <span class="metric-label">Диск:</span>
+                    <span class="metric-value ${getStatusColor(diskPct)}">${fmtPct(diskPct)}</span>
+                  </div>
+                  <div class="metric-item">
+                    <span class="metric-label">Uptime:</span>
+                    <span class="metric-value">${secsToDHMS(uptimeSec)}</span>
+                  </div>
+                </div>
+              </div>
+            `;
+          } else {
+            // Хост не работает - показываем ошибку
+            metricsElement.innerHTML = `
+              <div class="alert alert-warning mb-0">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                ${host.error || 'Ошибка подключения'}
+              </div>
+            `;
+          }
+        }
+
+        if (statusElement) {
+          statusElement.className = `status-indicator ${host.ok ? getStatusIndicator(cpuPct) : 'bg-danger'}`;
+        }
+      }
+    });
+  }
+
+  // Обновление локальной панели с данными текущего сервера
+  async function refreshLocalPanel() {
+    const el = document.getElementById('local-metrics');
+    
+    // Получаем данные всех хостов
+    try {
+      const hostsData = await fetchJSON('{{ url_for("monitor_hosts_json") }}');
+      console.log('Данные всех хостов:', hostsData);
+      
+      if (hostsData && hostsData.items && hostsData.items.length > 0) {
+        const currentHost = hostsData.items[0];
+        console.log('Текущий хост:', currentHost);
+        
+        // Обновляем заголовок локальной панели
+        const headerEl = document.querySelector('#local-panel-header');
+        if (headerEl) {
+          headerEl.innerHTML = `
+            <i class="fas fa-server text-success me-2"></i>
+            Текущий сервер: ${currentHost.host_name}
+          `;
+        }
+        
+        // Используем renderRemote для данных удаленного сервера
+        renderRemote(el, currentHost);
+        updateStatsCards(currentHost);
+        
+        // Обновляем все хосты в списке
+        updateHostsList(hostsData.items);
+        return;
+      }
+    } catch (e) {
+      console.warn('Ошибка загрузки данных хостов:', e);
     }
+    
+    // Fallback: показываем локальные данные
+    console.log('Загружаем локальные данные...');
+    const data = await fetchJSON("{{ url_for('monitor_local_json') }}");
+    console.log('Локальные данные:', data);
+    
+    const headerEl = document.querySelector('#local-panel-header');
+    if (headerEl) {
+      headerEl.innerHTML = `
+        <i class="fas fa-desktop text-info me-2"></i>
+        Локальная панель
+      `;
+    }
+    renderLocal(el, data);
+    updateStatsCards(data);
   }
 
-  document.getElementById('refresh-hosts')?.addEventListener('click', loadHosts);
-
-  async function tick(){ await loadLocal(); await loadHosts(); }
-  tick();
-  setInterval(tick, 10000);
-
-  // Charts for metrics history
-  const mhHost = document.getElementById('mh-host');
-  const mhMetric = document.getElementById('mh-metric');
-  const mhRange = document.getElementById('mh-range');
-  const mhRefresh = document.getElementById('mh-refresh');
-  const mhCanvas = document.getElementById('mh-canvas');
-  let mhChart = null;
-
-  async function mhLoadHosts(){
-    try{
-      const r = await fetch("{{ url_for('monitor_hosts_json') }}", {headers:{'Accept':'application/json'}});
-      const j = await r.json();
-      const items = (j.items||[]).filter(it => it && it.host_name);
-      mhHost.innerHTML='';
-      if (!items.length){ mhHost.innerHTML='<option value="">Нет хостов</option>'; return; }
-      for (const it of items){ const o=document.createElement('option'); o.value=it.host_name; o.textContent=it.host_name; mhHost.appendChild(o); }
-    }catch(_){ mhHost.innerHTML='<option value="">Ошибка загрузки</option>'; }
+  // Простое автоматическое обновление
+  function startAutoRefresh() {
+    if (autoRefreshInterval) {
+      clearInterval(autoRefreshInterval);
+    }
+    autoRefreshInterval = setInterval(async () => {
+      await refreshLocalPanel();
+    }, 30000); // Обновляем каждые 30 секунд
   }
 
-  async function mhDraw(){
-    if (!mhCanvas) return;
-    const host = mhHost?.value; if (!host) return;
-    const limit = parseInt(mhRange.value||'60', 10);
-    const url = `{{ url_for('monitor_host_metrics_json', host_name='__H__') }}`.replace('__H__', encodeURIComponent(host)) + `?limit=${limit}`;
-    try{
-      const r = await fetch(url, {headers:{'Accept':'application/json'}});
-      const j = await r.json(); if (!j.ok) return;
-      const arr = (j.items||[]).slice().reverse();
-      const labels = arr.map(x => x.created_at);
-      const metric = mhMetric.value || 'cpu_percent';
-      const data = arr.map(x => Number(x[metric]||0));
-      const ctx = mhCanvas.getContext('2d');
-      if (mhChart) mhChart.destroy();
-      const color = metric==='mem_percent'? '#ae3ec9' : (metric==='disk_percent'? '#2fb344' : '#206bc4');
-      mhChart = new Chart(ctx, { type:'line', data:{ labels, datasets:[{ label: metric, data, borderColor: color, backgroundColor:'rgba(32,107,196,0.08)', borderWidth:2, fill:true, tension:0.3, pointRadius:0 }]}, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:true}, tooltip:{enabled:true}, zoom:{ zoom:{ wheel:{enabled:true}, pinch:{enabled:true}, mode:'x'}, pan:{enabled:true, mode:'x'} } }, scales:{ y:{ beginAtZero:true, suggestedMax:100 } } } });
-    }catch(_){ }
+  // Привязка кнопок
+  async function bindButtons() {
+    // Кнопки обновления хостов
+    document.querySelectorAll('button[data-host]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const host = btn.getAttribute('data-host');
+        const targetSel = btn.getAttribute('data-target');
+        const el = document.querySelector(targetSel);
+        const statusEl = document.querySelector(`#host-status-${Array.from(document.querySelectorAll('button[data-host]')).indexOf(btn) + 1}`);
+        
+        if (el) {
+          el.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+        }
+        if (statusEl) {
+          statusEl.className = 'status-indicator bg-warning';
+        }
+
+        const data = await fetchJSON(`{{ url_for('monitor_host_json', host_name='__HOST__') }}`.replace('__HOST__', encodeURIComponent(host)));
+        
+        if (el) renderRemote(el, data);
+        if (statusEl) {
+          statusEl.className = `status-indicator ${data.ok ? getStatusIndicator(data.cpu?.percent || 0) : 'bg-danger'}`;
+        }
+      });
+    });
+
+    // Кнопки обновления SSH целей (пока не реализованы)
+    document.querySelectorAll('button[data-target-name]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = btn.getAttribute('data-target-name');
+        const targetSel = btn.getAttribute('data-target');
+        const el = document.querySelector(targetSel);
+        const statusEl = document.querySelector(`#target-status-${Array.from(document.querySelectorAll('button[data-target-name]')).indexOf(btn) + 1}`);
+        
+        if (el) {
+          el.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Загрузка...</div>';
+        }
+        if (statusEl) {
+          statusEl.className = 'status-indicator bg-warning';
+        }
+
+        // Пока что показываем ошибку, так как SSH цели не реализованы
+        const data = { ok: false, error: 'SSH цели не настроены' };
+        
+        if (el) renderRemote(el, data);
+        if (statusEl) {
+          statusEl.className = `status-indicator ${data.ok ? getStatusIndicator(data.cpu?.percent || 0) : 'bg-danger'}`;
+        }
+      });
+    });
+
+    // Кнопка обновления всех
+    document.getElementById('refresh-all')?.addEventListener('click', async () => {
+      await refreshLocalPanel();
+      
+      // Обновляем все хосты и цели
+      document.querySelectorAll('button[data-host], button[data-target-name]').forEach(btn => {
+        btn.click();
+      });
+    });
+
+    // Запускаем автоматическое обновление
+    startAutoRefresh();
+
+    // Переключатели периода графика
+    document.querySelectorAll('input[name="chart-period"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        currentPeriod = parseInt(radio.value);
+        refreshCharts();
+      });
+    });
   }
 
-  mhRefresh?.addEventListener('click', mhDraw);
-  mhMetric?.addEventListener('change', mhDraw);
-  mhRange?.addEventListener('change', mhDraw);
-  mhHost?.addEventListener('change', mhDraw);
+  // Инициализация
+  async function init() {
+    createMainChart();
+    createLocalMiniChart();
+    await refreshLocalPanel();
+    await refreshCharts();
+    bindButtons();
+  }
 
-  (async function(){ await mhLoadHosts(); await mhDraw(); })();})();
+  // Очистка при уходе со страницы
+  window.addEventListener('beforeunload', () => {
+    if (autoRefreshInterval) {
+      clearInterval(autoRefreshInterval);
+    }
+  });
+
+  // Запуск
+  init();
+})();
 </script>
 {% endblock %}
-

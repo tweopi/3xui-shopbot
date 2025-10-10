@@ -1,5 +1,6 @@
 ﻿import asyncio
 import logging
+import json
 
 from datetime import datetime, timedelta
 
@@ -365,6 +366,25 @@ async def _maybe_collect_host_metrics():
     now = datetime.now()
     if _last_metrics_run_at and (now - _last_metrics_run_at).total_seconds() < METRICS_INTERVAL_SECONDS:
         return
+    
+    # Собираем локальные метрики
+    try:
+        local_metrics = await asyncio.wait_for(asyncio.to_thread(resource_monitor.get_local_metrics), timeout=10)
+        if local_metrics and local_metrics.get('ok'):
+            database.insert_resource_metric(
+                'local', 'panel',
+                cpu_percent=local_metrics.get('cpu_percent'),
+                mem_percent=local_metrics.get('mem_percent'),
+                disk_percent=local_metrics.get('disk_percent'),
+                load1=local_metrics.get('loadavg', {}).get('1m') if local_metrics.get('loadavg') else None,
+                net_bytes_sent=local_metrics.get('network_sent'),
+                net_bytes_recv=local_metrics.get('network_recv'),
+                raw_json=json.dumps(local_metrics, ensure_ascii=False)
+            )
+    except Exception as e:
+        logger.error(f"Scheduler: Ошибка сбора локальных метрик: {e}")
+    
+    # Собираем метрики хостов
     hosts = database.get_all_hosts()
     if not hosts:
         _last_metrics_run_at = now
@@ -382,6 +402,16 @@ async def _maybe_collect_host_metrics():
                 m = await asyncio.wait_for(asyncio.to_thread(resource_monitor.get_host_metrics_via_ssh, h), timeout=30)
             try:
                 database.insert_host_metrics(host_name, m)
+                # Также сохраняем в resource_metrics для графиков
+                if m and m.get('ok'):
+                    database.insert_resource_metric(
+                        'host', host_name,
+                        cpu_percent=m.get('cpu_percent'),
+                        mem_percent=m.get('mem_percent'),
+                        disk_percent=m.get('disk_percent'),
+                        load1=m.get('loadavg', {}).get('1m') if m.get('loadavg') else None,
+                        raw_json=json.dumps(m, ensure_ascii=False)
+                    )
             except Exception as e:
                 logger.warning(f"Scheduler: insert_host_metrics failed for {host_name}: {e}")
         except asyncio.TimeoutError:

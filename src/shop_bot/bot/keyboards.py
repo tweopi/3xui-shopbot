@@ -3,6 +3,7 @@ import hashlib
 import re
 
 from datetime import datetime
+from typing import Callable
 
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -47,9 +48,272 @@ def find_host_by_callback_token(hosts: list[dict], token: str) -> dict | None:
     return None
 
 
+# --- Generic builder from DB configs ---
+def _build_keyboard_from_db(
+    menu_type: str,
+    text_replacements: dict[str, str] | None = None,
+    filter_func: Callable[[dict], bool] | None = None,
+) -> InlineKeyboardMarkup | None:
+    """Build InlineKeyboardMarkup from button configs for a given menu_type.
+    Returns None if configs are missing or on error.
+    """
+    try:
+        from shop_bot.data_manager.database import get_button_configs
+        configs = get_button_configs(menu_type)
+    except Exception as e:
+        logger.warning(f"DB configs for {menu_type} not available: {e}")
+        return None
+
+    if not configs:
+        return None
+
+    builder = InlineKeyboardBuilder()
+
+    # Group by row, keep positions and widths
+    rows: dict[int, list[dict]] = {}
+    added: set[str] = set()
+
+    for cfg in configs:
+        if not cfg.get('is_active', True):
+            continue
+        if filter_func and not filter_func(cfg):
+            continue
+
+        text = cfg.get('text', '') or ''
+        callback_data = cfg.get('callback_data')
+        url = cfg.get('url')
+        button_id = (cfg.get('button_id') or '').strip()
+
+        if not callback_data and not url:
+            continue
+
+        # Deduplicate by button_id if provided
+        if button_id:
+            if button_id in added:
+                continue
+            added.add(button_id)
+
+        # Apply text replacements (e.g., counts)
+        if text_replacements:
+            try:
+                for k, v in text_replacements.items():
+                    text = text.replace(k, str(v))
+            except Exception:
+                pass
+
+        row_pos = int(cfg.get('row_position', 0) or 0)
+        col_pos = int(cfg.get('column_position', 0) or 0)
+        sort_order = int(cfg.get('sort_order', 0) or 0)
+        width = int(cfg.get('button_width', 1) or 1)
+
+        rows.setdefault(row_pos, []).append({
+            'text': text,
+            'callback_data': callback_data,
+            'url': url,
+            'width': max(1, min(width, 3)),
+            'col': col_pos,
+            'sort': sort_order,
+        })
+
+    if not rows:
+        return None
+
+    # Build keyboard respecting row positions and button widths
+    # In Telegram: width 1 = half row, width 2+ = full row
+    for row_idx in sorted(rows.keys()):
+        row_buttons = sorted(rows[row_idx], key=lambda b: (b['col'], b['sort']))
+        
+        # Process buttons for this row position
+        i = 0
+        while i < len(row_buttons):
+            btn = row_buttons[i]
+            button_width = btn['width']
+            
+            # Width 2+ means full row
+            if button_width >= 2:
+                # Add as single button in row
+                if btn['callback_data']:
+                    builder.row(InlineKeyboardButton(text=btn['text'], callback_data=btn['callback_data']))
+                elif btn['url']:
+                    builder.row(InlineKeyboardButton(text=btn['text'], url=btn['url']))
+                i += 1
+            else:
+                # Width 1 - try to pair with next button if it also has width 1
+                if i + 1 < len(row_buttons) and row_buttons[i + 1]['width'] == 1:
+                    # Add two buttons in one row
+                    btn2 = row_buttons[i + 1]
+                    buttons = []
+                    
+                    if btn['callback_data']:
+                        buttons.append(InlineKeyboardButton(text=btn['text'], callback_data=btn['callback_data']))
+                    elif btn['url']:
+                        buttons.append(InlineKeyboardButton(text=btn['text'], url=btn['url']))
+                    
+                    if btn2['callback_data']:
+                        buttons.append(InlineKeyboardButton(text=btn2['text'], callback_data=btn2['callback_data']))
+                    elif btn2['url']:
+                        buttons.append(InlineKeyboardButton(text=btn2['text'], url=btn2['url']))
+                    
+                    builder.row(*buttons)
+                    i += 2
+                else:
+                    # Single button with width 1 - add alone
+                    if btn['callback_data']:
+                        builder.row(InlineKeyboardButton(text=btn['text'], callback_data=btn['callback_data']))
+                    elif btn['url']:
+                        builder.row(InlineKeyboardButton(text=btn['text'], url=btn['url']))
+                    i += 1
+
+    return builder.as_markup()
+
+
 def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: bool) -> InlineKeyboardMarkup:
+    # Prepare filters and replacements for main menu
+    def _filter(cfg: dict) -> bool:
+        button_id = (cfg.get('button_id') or '').strip()
+        # Filter trial button
+        if button_id == 'btn_try':
+            if not trial_available or get_setting("trial_enabled") != "true":
+                return False
+        # Filter admin button
+        if button_id == 'btn_admin' and not is_admin:
+            return False
+        return True
+    
+    # Text replacements for key count
+    replacements = {
+        '{count}': str(len(user_keys)),
+        '((count))': f'({len(user_keys)})'
+    }
+    
+    # Try DB-driven keyboard first
+    kb = _build_keyboard_from_db('main_menu', text_replacements=replacements, filter_func=_filter)
+    if kb:
+        return kb
+    
+    # Fallback to original implementation if DB config not available
     builder = InlineKeyboardBuilder()
     
+    # Try to get button configurations from database first
+    try:
+        from shop_bot.data_manager.database import get_button_configs
+        button_configs = get_button_configs('main_menu')
+
+        logger.info(f"Loaded {len(button_configs)} button configs from database")
+
+        if button_configs:
+            # Группируем по строкам с учётом позиций
+            rows: dict[int, list[dict]] = {}
+            added_buttons: set[str] = set()
+
+            for cfg in button_configs:
+                if not cfg.get('is_active', True):
+                    continue
+
+                text = cfg.get('text', '') or ''
+                callback_data = cfg.get('callback_data')
+                url = cfg.get('url')
+                button_id = cfg.get('button_id', '') or ''
+
+                # Пропускаем пустые действия
+                if not callback_data and not url:
+                    continue
+
+                # Фильтры по условиям (trial/admin)
+                if button_id == 'btn_try':
+                    if not trial_available or get_setting("trial_enabled") != "true":
+                        continue
+                if button_id == 'btn_admin' and not is_admin:
+                    continue
+
+                # Подстановка счётчика ключей
+                if button_id == 'btn_my_keys':
+                    try:
+                        text = text.replace('{count}', str(len(user_keys))).replace('((count))', f'({len(user_keys)})')
+                    except Exception:
+                        pass
+
+                # Исключаем дубликаты по button_id
+                if button_id:
+                    if button_id in added_buttons:
+                        logger.warning(f"Duplicate button detected: {button_id}, skipping")
+                        continue
+                    added_buttons.add(button_id)
+
+                row_pos = int(cfg.get('row_position', 0) or 0)
+                col_pos = int(cfg.get('column_position', 0) or 0)
+                sort_order = int(cfg.get('sort_order', 0) or 0)
+                width = int(cfg.get('button_width', 1) or 1)
+
+                rows.setdefault(row_pos, []).append({
+                    'text': text,
+                    'callback_data': callback_data,
+                    'url': url,
+                    'width': max(1, min(int(width), 3)),
+                    'col': col_pos,
+                    'sort': sort_order,
+                })
+
+            # Функция добавления кнопки в билдер
+            def _add(btn: dict):
+                if btn['callback_data']:
+                    builder.button(text=btn['text'], callback_data=btn['callback_data'])
+                elif btn['url']:
+                    builder.button(text=btn['text'], url=btn['url'])
+
+            # Build keyboard respecting row positions and button widths
+            # In Telegram: width 1 = half row, width 2+ = full row
+            for row_idx in sorted(rows.keys()):
+                row_buttons = sorted(rows[row_idx], key=lambda b: (b['col'], b['sort']))
+                
+                # Process buttons for this row position
+                i = 0
+                while i < len(row_buttons):
+                    btn = row_buttons[i]
+                    button_width = btn['width']
+                    
+                    # Width 2+ means full row
+                    if button_width >= 2:
+                        # Add as single button in row
+                        if btn['callback_data']:
+                            builder.row(InlineKeyboardButton(text=btn['text'], callback_data=btn['callback_data']))
+                        elif btn['url']:
+                            builder.row(InlineKeyboardButton(text=btn['text'], url=btn['url']))
+                        i += 1
+                    else:
+                        # Width 1 - try to pair with next button if it also has width 1
+                        if i + 1 < len(row_buttons) and row_buttons[i + 1]['width'] == 1:
+                            # Add two buttons in one row
+                            btn2 = row_buttons[i + 1]
+                            buttons = []
+                            
+                            if btn['callback_data']:
+                                buttons.append(InlineKeyboardButton(text=btn['text'], callback_data=btn['callback_data']))
+                            elif btn['url']:
+                                buttons.append(InlineKeyboardButton(text=btn['text'], url=btn['url']))
+                            
+                            if btn2['callback_data']:
+                                buttons.append(InlineKeyboardButton(text=btn2['text'], callback_data=btn2['callback_data']))
+                            elif btn2['url']:
+                                buttons.append(InlineKeyboardButton(text=btn2['text'], url=btn2['url']))
+                            
+                            builder.row(*buttons)
+                            i += 2
+                        else:
+                            # Single button with width 1 - add alone
+                            if btn['callback_data']:
+                                builder.row(InlineKeyboardButton(text=btn['text'], callback_data=btn['callback_data']))
+                            elif btn['url']:
+                                builder.row(InlineKeyboardButton(text=btn['text'], url=btn['url']))
+                            i += 1
+
+
+            return builder.as_markup()
+    except Exception as e:
+        logger.warning(f"Failed to load button configs from database: {e}, falling back to settings")
+    
+    # Fallback to original hardcoded logic
+    logger.info("Using fallback hardcoded button logic")
     if trial_available and get_setting("trial_enabled") == "true":
         builder.button(text=(get_setting("btn_try") or "🎁 Попробовать бесплатно"), callback_data="get_trial")
 
@@ -81,6 +345,12 @@ def create_main_menu_keyboard(user_keys: list, trial_available: bool, is_admin: 
     return builder.as_markup()
 
 def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
+    # Try DB-driven keyboard first
+    kb = _build_keyboard_from_db('admin_menu')
+    if kb:
+        return kb
+
+    # Fallback hardcoded
     builder = InlineKeyboardBuilder()
     builder.button(text="👥 Пользователи", callback_data="admin_users")
     builder.button(text="🌍 Ключи на хосте", callback_data="admin_host_keys")
@@ -93,7 +363,6 @@ def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🎟 Промокоды", callback_data="admin_promo_menu")
     builder.button(text="📢 Рассылка", callback_data="start_broadcast")
     builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
-    # Ряды по 2 кнопки, мониторинг вынесен отдельно; последняя строка — "Назад"
     builder.adjust(2, 2, 2, 2, 1, 1, 1)
     return builder.as_markup()
 
@@ -284,6 +553,19 @@ def create_support_bot_link_keyboard(support_bot_username: str) -> InlineKeyboar
     return builder.as_markup()
 
 def create_support_menu_keyboard(has_external: bool = False) -> InlineKeyboardMarkup:
+    def _filter(cfg: dict) -> bool:
+        # Если внешняя поддержка недоступна, скрыть кнопку support_external
+        if not has_external:
+            cd = (cfg.get('callback_data') or '').strip()
+            bid = (cfg.get('button_id') or '').strip()
+            if cd == 'support_external' or bid == 'btn_support_external':
+                return False
+        return True
+
+    kb = _build_keyboard_from_db('support_menu', filter_func=_filter)
+    if kb:
+        return kb
+
     builder = InlineKeyboardBuilder()
     builder.button(text=(get_setting("btn_support_new_ticket") or "✍️ Новое обращение"), callback_data="support_new_ticket")
     builder.button(text=(get_setting("btn_support_my_tickets") or "📨 Мои обращения"), callback_data="support_my_tickets")
@@ -603,6 +885,10 @@ def create_back_to_menu_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 def create_profile_keyboard() -> InlineKeyboardMarkup:
+    kb = _build_keyboard_from_db('profile_menu')
+    if kb:
+        return kb
+
     builder = InlineKeyboardBuilder()
     builder.button(text=(get_setting("btn_top_up") or "➕ Пополнить баланс"), callback_data="top_up_start")
     builder.button(text=(get_setting("btn_referral") or "🤝 Реферальная программа"), callback_data="show_referral_program")

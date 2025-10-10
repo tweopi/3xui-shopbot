@@ -52,6 +52,7 @@
 						</span>
 					</a>
 					<a href="{{ url_for('monitor_page') }}" class="nav-link {% if request.endpoint == 'monitor_page' %}active{% endif %}">Монитор</a>
+					<a href="{{ url_for('button_constructor_page') }}" class="nav-link {% if request.endpoint == 'button_constructor_page' %}active{% endif %}">Конструктор</a>
 					<a href="{{ url_for('settings_page') }}" class="nav-link {% if request.endpoint == 'settings_page' %}active{% endif %}">Настройки</a>
 				</nav>
 				<div class="bm float-end">
@@ -64,6 +65,7 @@
 							<li><a href="{{ url_for('admin_keys_page') }}">Ключи</a></li>
 							<li><a href="{{ url_for('support_list_page') }}">Поддержка</a></li>
 							<li><a href="{{ url_for('monitor_page') }}">Монитор</a></li>
+							<li><a href="{{ url_for('button_constructor_page') }}">Конструктор</a></li>
 							<li><a href="{{ url_for('settings_page') }}">Настройки</a></li>
 						</ul>
 					</nav>
