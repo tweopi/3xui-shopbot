@@ -23,6 +23,7 @@ from pytonconnect import TonConnect
 from pytonconnect.exceptions import UserRejectsError
 from aiogram import Bot, Router, F, types, html
 from aiogram.types import BufferedInputFile
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command, CommandObject, CommandStart, StateFilter
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
@@ -384,6 +385,93 @@ def get_user_router() -> Router:
             f"\n💰 <b>Заработано по рефералке (всего):</b> {total_ref_earned:.2f} RUB"
         )
         await callback.message.edit_text(final_text, reply_markup=keyboards.create_profile_keyboard())
+
+    @user_router.callback_query(F.data == "profile_info")
+    @registration_required
+    async def profile_info_handler(callback: types.CallbackQuery):
+        await callback.answer()
+        user_id = callback.from_user.id
+        user_db_data = get_user(user_id)
+        user_keys = get_user_keys(user_id)
+        
+        if not user_db_data:
+            await callback.answer("Не удалось получить данные профиля.", show_alert=True)
+            return
+            
+        username = html.bold(user_db_data.get('username', 'Пользователь'))
+        total_spent = user_db_data.get('total_spent', 0)
+        total_months = user_db_data.get('total_months', 0)
+        
+        now = datetime.now()
+        active_keys = [key for key in user_keys if datetime.fromisoformat(key['expiry_date']) > now]
+        
+        if active_keys:
+            latest_key = max(active_keys, key=lambda k: datetime.fromisoformat(k['expiry_date']))
+            latest_expiry_date = datetime.fromisoformat(latest_key['expiry_date'])
+            time_left = latest_expiry_date - now
+            vpn_status_text = get_vpn_active_text(time_left.days, time_left.seconds // 3600)
+        elif user_keys:
+            vpn_status_text = VPN_INACTIVE_TEXT
+        else:
+            vpn_status_text = VPN_NO_DATA_TEXT
+            
+        final_text = get_profile_text(username, total_spent, total_months, vpn_status_text)
+        
+        # Добавляем дополнительную информацию
+        final_text += f"\n\n📊 <b>Статистика:</b>"
+        final_text += f"\n🔑 <b>Всего ключей:</b> {len(user_keys)}"
+        final_text += f"\n✅ <b>Активных ключей:</b> {len(active_keys)}"
+        final_text += f"\n💸 <b>Потрачено всего:</b> {total_spent:.2f} RUB"
+        final_text += f"\n📅 <b>Месяцев подписки:</b> {total_months}"
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="⬅️ Назад", callback_data="show_profile")
+        await callback.message.edit_text(final_text, reply_markup=builder.as_markup())
+
+    @user_router.callback_query(F.data == "profile_balance")
+    @registration_required
+    async def profile_balance_handler(callback: types.CallbackQuery):
+        await callback.answer()
+        user_id = callback.from_user.id
+        
+        try:
+            main_balance = get_balance(user_id)
+        except Exception:
+            main_balance = 0.0
+            
+        try:
+            referral_count = get_referral_count(user_id)
+        except Exception:
+            referral_count = 0
+            
+        try:
+            total_ref_earned = float(get_referral_balance_all(user_id))
+        except Exception:
+            total_ref_earned = 0.0
+            
+        try:
+            ref_balance = float(get_referral_balance(user_id))
+        except Exception:
+            ref_balance = 0.0
+        
+        text = f"💰 <b>Информация о балансе</b>\n\n"
+        text += f"💼 <b>Основной баланс:</b> {main_balance:.2f} RUB\n"
+        text += f"🤝 <b>Реферальный баланс:</b> {ref_balance:.2f} RUB\n"
+        text += f"📊 <b>Всего заработано по рефералке:</b> {total_ref_earned:.2f} RUB\n"
+        text += f"👥 <b>Приглашено пользователей:</b> {referral_count}\n\n"
+        text += f"💡 <b>Совет:</b> Используйте реферальный баланс для покупки ключей!"
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="💳 Пополнить", callback_data="top_up_start")
+        builder.button(text="⬅️ Назад", callback_data="show_profile")
+        builder.adjust(1)
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+    @user_router.callback_query(F.data == "main_menu")
+    @registration_required
+    async def profile_main_menu_handler(callback: types.CallbackQuery):
+        await callback.answer()
+        await show_main_menu(callback.message, edit_message=True)
 
     @user_router.callback_query(F.data == "top_up_start")
     @registration_required
