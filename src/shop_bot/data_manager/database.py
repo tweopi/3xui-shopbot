@@ -293,8 +293,11 @@ def initialize_db():
                 if 'created_date' not in columns:
                     cursor.execute("ALTER TABLE vpn_keys ADD COLUMN created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
                     logging.info("Добавлена колонка created_date в таблицу vpn_keys")
+                if 'xui_client_uuid' not in columns:
+                    cursor.execute("ALTER TABLE vpn_keys ADD COLUMN xui_client_uuid TEXT")
+                    logging.info("Добавлена колонка xui_client_uuid в таблицу vpn_keys")
             except Exception as e:
-                logging.warning(f"Ошибка при добавлении колонки created_date: {e}")
+                logging.warning(f"Ошибка при добавлении колонок в таблицу vpn_keys: {e}")
             
             logging.info("База данных успешно инициализирована.")
     except sqlite3.Error as e:
@@ -2729,13 +2732,30 @@ def migrate_existing_buttons() -> bool:
                     {'button_id': 'btn_admin', 'callback_data': 'admin_menu', 'text': '⚙️ Админка', 'row_position': 6, 'column_position': 0, 'button_width': 2},
                 ],
                 'admin_menu': [
+                    # Row 1: Two buttons
                     {'button_id': 'admin_users', 'callback_data': 'admin_users', 'text': '👥 Пользователи', 'row_position': 0, 'column_position': 0, 'button_width': 1},
-                    {'button_id': 'admin_keys', 'callback_data': 'admin_keys', 'text': '🔑 Ключи', 'row_position': 0, 'column_position': 1, 'button_width': 1},
-                    {'button_id': 'admin_settings', 'callback_data': 'admin_settings', 'text': '⚙️ Настройки', 'row_position': 1, 'column_position': 0, 'button_width': 1},
-                    {'button_id': 'admin_stats', 'callback_data': 'admin_stats', 'text': '📊 Статистика', 'row_position': 1, 'column_position': 1, 'button_width': 1},
-                    {'button_id': 'admin_logs', 'callback_data': 'admin_logs', 'text': '📝 Логи', 'row_position': 2, 'column_position': 0, 'button_width': 1},
-                    {'button_id': 'admin_backup', 'callback_data': 'admin_backup', 'text': '💾 Резервная копия', 'row_position': 2, 'column_position': 1, 'button_width': 1},
-                    {'button_id': 'back_to_main', 'callback_data': 'main_menu', 'text': '🏠 Главное меню', 'row_position': 3, 'column_position': 0, 'button_width': 2},
+                    {'button_id': 'admin_keys', 'callback_data': 'admin_host_keys', 'text': '🔑 Ключи', 'row_position': 0, 'column_position': 1, 'button_width': 1},
+                    
+                    # Row 2: Two buttons
+                    {'button_id': 'admin_issue_key', 'callback_data': 'admin_gift_key', 'text': '🎁 Выдать ключ', 'row_position': 1, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'admin_speed_test', 'callback_data': 'admin_speed_test', 'text': '⚡ Тест скорости', 'row_position': 1, 'column_position': 1, 'button_width': 1},
+                    
+                    # Row 3: Two buttons
+                    {'button_id': 'admin_monitoring', 'callback_data': 'admin_monitoring', 'text': '📊 Мониторинг', 'row_position': 2, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'admin_db_backup', 'callback_data': 'admin_backup_db', 'text': '💾 Бэкап БД', 'row_position': 2, 'column_position': 1, 'button_width': 1},
+                    
+                    # Row 4: Two buttons
+                    {'button_id': 'admin_restore_db', 'callback_data': 'admin_restore_db', 'text': '🔄 Восстановить БД', 'row_position': 3, 'column_position': 0, 'button_width': 1},
+                    {'button_id': 'admin_administrators', 'callback_data': 'admin_administrators', 'text': '👮 Администраторы', 'row_position': 3, 'column_position': 1, 'button_width': 1},
+                    
+                    # Row 5: Wide button
+                    {'button_id': 'admin_promo_codes', 'callback_data': 'admin_promo_codes', 'text': '🏷️ Промокоды', 'row_position': 4, 'column_position': 0, 'button_width': 2},
+                    
+                    # Row 6: Wide button
+                    {'button_id': 'admin_mailing', 'callback_data': 'admin_mailing', 'text': '📢 Рассылка', 'row_position': 5, 'column_position': 0, 'button_width': 2},
+                    
+                    # Row 7: Wide button
+                    {'button_id': 'back_to_main', 'callback_data': 'main_menu', 'text': '⬅️ Назад в меню', 'row_position': 6, 'column_position': 0, 'button_width': 2},
                 ],
                 'profile_menu': [
                     {'button_id': 'profile_info', 'callback_data': 'profile_info', 'text': 'ℹ️ Информация', 'row_position': 0, 'column_position': 0, 'button_width': 1},

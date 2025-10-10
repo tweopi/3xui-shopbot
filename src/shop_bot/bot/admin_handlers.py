@@ -114,6 +114,26 @@ def get_admin_router() -> Router:
         else:
             await message.answer(text, reply_markup=keyboard)
 
+    async def admin_keys_menu_handler(callback: types.CallbackQuery):
+        """Показать меню управления ключами."""
+        text = (
+            "🔑 <b>Управление ключами</b>\n\n"
+            "Выберите действие для управления ключами:"
+        )
+        
+        keyboard = InlineKeyboardBuilder()
+        keyboard.button(text="🌐 Ключи на хосте", callback_data="admin_keys_host")
+        keyboard.button(text="🎁 Выдать ключ", callback_data="admin_issue_key")
+        keyboard.button(text="🗑️ Удалить ключ", callback_data="admin_delete_key")
+        keyboard.button(text="⏰ Продлить ключ", callback_data="admin_extend_key")
+        keyboard.button(text="⬅️ В админ-меню", callback_data="admin_menu")
+        keyboard.adjust(2, 2, 1)
+        
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard.as_markup())
+        except Exception:
+            await callback.message.answer(text, reply_markup=keyboard.as_markup())
+
     def _format_monitor_metrics() -> tuple[str, dict[str, float]]:
         local = resource_monitor.get_local_metrics()
         hosts = []
@@ -214,6 +234,49 @@ def get_admin_router() -> Router:
             return
         await callback.answer()
         await show_admin_menu(callback.message, edit_message=True)
+
+
+    @admin_router.callback_query(F.data == "admin_speed_test")
+    async def admin_speed_test_handler(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await admin_speedtest_entry(callback)
+
+    @admin_router.callback_query(F.data == "admin_monitoring")
+    async def admin_monitoring_handler(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await admin_monitor_open(callback)
+
+
+    @admin_router.callback_query(F.data == "admin_administrators")
+    async def admin_administrators_handler(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await admin_admins_menu_entry(callback)
+
+    @admin_router.callback_query(F.data == "admin_promo_codes")
+    async def admin_promo_codes_handler(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await admin_promo_menu(callback)
+
+    @admin_router.callback_query(F.data == "admin_mailing")
+    async def admin_mailing_handler(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await start_broadcast_handler(callback, state)
+
 
     @admin_router.callback_query(F.data == "admin_monitor")
     async def admin_monitor_open(callback: types.CallbackQuery):
