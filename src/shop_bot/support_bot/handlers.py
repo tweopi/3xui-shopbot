@@ -204,7 +204,7 @@ def get_support_router() -> Router:
                 )
                 await bot.send_message(chat_id=chat_id, text=header, message_thread_id=thread_id, reply_markup=_admin_actions_kb(ticket_id))
             except Exception as e:
-                logger.warning(f"Failed to create forum topic or send message for ticket {ticket_id}: {e}")
+                logger.warning(f"Не удалось создать форумную тему или отправить сообщение для тикета {ticket_id}: {e}")
         try:
             ticket = get_ticket(ticket_id)
             forum_chat_id = ticket and ticket.get('forum_chat_id')
@@ -226,7 +226,7 @@ def get_support_router() -> Router:
                     message_thread_id=int(thread_id)
                 )
         except Exception as e:
-            logger.warning(f"Failed to mirror user message to forum: {e}")
+            logger.warning(f"Не удалось отзеркалить сообщение пользователя в форум: {e}")
         await state.clear()
         if created_new:
             await message.answer(
@@ -255,7 +255,7 @@ def get_support_router() -> Router:
                 except Exception:
                     pass
         except Exception as e:
-            logger.warning(f"Failed to notify admins about ticket {ticket_id}: {e}")
+            logger.warning(f"Не удалось уведомить администраторов о тикете {ticket_id}: {e}")
 
     @router.callback_query(F.data == "support_my_tickets")
     async def support_my_tickets_handler(callback: types.CallbackQuery):
@@ -363,7 +363,7 @@ def get_support_router() -> Router:
                         )
                         await bot.send_message(chat_id=chat_id, text=header, message_thread_id=thread_id, reply_markup=_admin_actions_kb(ticket_id))
                     except Exception as e:
-                        logger.warning(f"Failed to auto-create forum topic for ticket {ticket_id}: {e}")
+                        logger.warning(f"Не удалось автоматически создать форумную тему для тикета {ticket_id}: {e}")
             if forum_chat_id and thread_id:
                 try:
                     subj_full = (ticket.get('subject') or 'Обращение без темы')
@@ -379,7 +379,7 @@ def get_support_router() -> Router:
                     topic_name = f"#{ticket_id} {important_prefix}{trimmed} • от {author_tag}"
                     await bot.edit_forum_topic(chat_id=int(forum_chat_id), message_thread_id=int(thread_id), name=topic_name)
                 except Exception as e:
-                    logger.warning(f"Failed to rename existing topic for ticket {ticket_id}: {e}")
+                    logger.warning(f"Не удалось переименовать существующую тему для тикета {ticket_id}: {e}")
                 username = (message.from_user.username and f"@{message.from_user.username}") or message.from_user.full_name or str(message.from_user.id)
                 await bot.send_message(
                     chat_id=int(forum_chat_id),
@@ -388,7 +388,7 @@ def get_support_router() -> Router:
                 )
                 await bot.copy_message(chat_id=int(forum_chat_id), from_chat_id=message.chat.id, message_id=message.message_id, message_thread_id=int(thread_id))
         except Exception as e:
-            logger.warning(f"Failed to mirror user reply to forum: {e}")
+            logger.warning(f"Не удалось отзеркалить ответ пользователя в форум: {e}")
         admin_id = get_setting("admin_telegram_id")
         if admin_id:
             try:
@@ -402,7 +402,7 @@ def get_support_router() -> Router:
                     )
                 )
             except Exception as e:
-                logger.warning(f"Failed to notify admin about ticket message #{ticket_id}: {e}")
+                logger.warning(f"Не удалось уведомить администратора о сообщении тикета #{ticket_id}: {e}")
 
     @router.message(F.is_topic_message == True)
     async def forum_thread_message_handler(message: types.Message, bot: Bot, state: FSMContext):
@@ -466,7 +466,7 @@ def get_support_router() -> Router:
                 if content:
                     await bot.send_message(chat_id=user_id, text=content)
         except Exception as e:
-            logger.warning(f"Failed to relay forum thread message: {e}")
+            logger.warning(f"Не удалось переслать сообщение из форумной темы: {e}")
 
     @router.callback_query(F.data.startswith("support_close_"))
     async def support_close_ticket_handler(callback: types.CallbackQuery, bot: Bot):
@@ -502,7 +502,7 @@ def get_support_router() -> Router:
                         pass
                 await bot.close_forum_topic(chat_id=int(forum_chat_id), message_thread_id=int(thread_id))
             except Exception as e:
-                logger.warning(f"Failed to close forum topic for ticket {ticket_id} from bot: {e}")
+                logger.warning(f"Не удалось закрыть форумную тему для тикета {ticket_id} из бота: {e}")
             await callback.message.edit_text("✅ Тикет закрыт.", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="⬅️ К списку", callback_data="support_my_tickets")]]))
             try:
                 await callback.message.answer("Меню поддержки:", reply_markup=_user_main_reply_kb())
@@ -950,7 +950,7 @@ def get_support_router() -> Router:
                         )
                         await bot.send_message(chat_id=chat_id, text=header, message_thread_id=thread_id, reply_markup=_admin_actions_kb(ticket_id))
                     except Exception as e:
-                        logger.warning(f"Failed to auto-create forum topic for ticket {ticket_id}: {e}")
+                        logger.warning(f"Не удалось автоматически создать форумную тему для тикета {ticket_id}: {e}")
             if forum_chat_id and thread_id:
                 try:
                     subj_full = (ticket.get('subject') or 'Обращение без темы')
@@ -966,7 +966,7 @@ def get_support_router() -> Router:
                     topic_name = f"#{ticket_id} {important_prefix}{trimmed} • от {author_tag}"
                     await bot.edit_forum_topic(chat_id=int(forum_chat_id), message_thread_id=int(thread_id), name=topic_name)
                 except Exception as e:
-                    logger.warning(f"Failed to rename topic for free-form message ticket {ticket_id}: {e}")
+                    logger.warning(f"Не удалось переименовать тему для тикета со свободным сообщением {ticket_id}: {e}")
                 username = (message.from_user.username and f"@{message.from_user.username}") or message.from_user.full_name or str(message.from_user.id)
                 await bot.send_message(
                     chat_id=int(forum_chat_id),
@@ -978,7 +978,7 @@ def get_support_router() -> Router:
                 )
                 await bot.copy_message(chat_id=int(forum_chat_id), from_chat_id=message.chat.id, message_id=message.message_id, message_thread_id=int(thread_id))
         except Exception as e:
-            logger.warning(f"Failed to mirror user free-form message to forum for ticket {ticket_id}: {e}")
+            logger.warning(f"Не удалось отзеркалить свободное сообщение пользователя в форум для тикета {ticket_id}: {e}")
 
         try:
             if created_new:

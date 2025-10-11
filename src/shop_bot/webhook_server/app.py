@@ -1299,7 +1299,7 @@ def create_webhook_app(bot_controller_instance):
             # Отдаём файл на скачивание
             return send_file(str(zip_path), as_attachment=True, download_name=os.path.basename(zip_path))
         except Exception as e:
-            logger.error(f"DB backup error: {e}")
+            logger.error(f"Ошибка резервного копирования БД: {e}")
             flash('Ошибка при создании бэкапа.', 'danger')
             return redirect(request.referrer or url_for('settings_page', tab='panel'))
 
@@ -1344,7 +1344,7 @@ def create_webhook_app(bot_controller_instance):
                 flash('Восстановление не удалось. Проверьте файл и повторите.', 'danger')
             return redirect(request.referrer or url_for('settings_page', tab='panel'))
         except Exception as e:
-            logger.error(f"DB restore error: {e}", exc_info=True)
+            logger.error(f"Ошибка восстановления БД: {e}", exc_info=True)
             flash('Ошибка при восстановлении БД.', 'danger')
             return redirect(request.referrer or url_for('settings_page', tab='panel'))
 
@@ -1784,7 +1784,7 @@ def create_webhook_app(bot_controller_instance):
                         metadata = find_and_complete_ton_transaction(payment_id, amount_ton)
                         
                         if metadata:
-                            logger.info(f"TON Payment successful for payment_id: {payment_id}")
+                            logger.info(f"TON Платеж успешен для payment_id: {payment_id}")
                             bot = _bot_controller.get_bot_instance()
                             loop = current_app.config.get('EVENT_LOOP')
                             payment_processor = handlers.process_successful_payment
@@ -1861,7 +1861,7 @@ def create_webhook_app(bot_controller_instance):
             update_setting('yoomoney_api_token', token)
             flash('YooMoney: токен успешно сохранён.', 'success')
         except Exception as e:
-            logger.error(f"YooMoney OAuth callback error: {e}", exc_info=True)
+            logger.error(f"YooMoney OAuth callback ошибка: {e}", exc_info=True)
             flash(f'Ошибка при обмене кода на токен: {e}', 'danger')
         return redirect(url_for('settings_page', tab='payments'))
 
@@ -2064,7 +2064,7 @@ def create_webhook_app(bot_controller_instance):
             return 'OK', 200
             
         except Exception as e:
-            logger.error(f"YooMoney webhook error: {e}", exc_info=True)
+            logger.error(f"YooMoney webhook ошибка: {e}", exc_info=True)
             return 'Error', 500
 
     return flask_app

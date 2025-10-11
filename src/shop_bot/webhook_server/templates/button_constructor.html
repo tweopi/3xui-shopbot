@@ -824,7 +824,8 @@ body {
 <script>
 class ButtonConstructor {
   constructor() {
-    this.currentMenuType = 'main_menu';
+    // Load saved menu type from localStorage or default to main_menu
+    this.currentMenuType = localStorage.getItem('buttonConstructorMenuType') || 'main_menu';
     this.selectedButton = null;
     this.buttons = [];
     this.isPreviewLoading = false;
@@ -883,7 +884,7 @@ class ButtonConstructor {
         menuEl.appendChild(item);
       });
       
-      const active = opts.find(o => o.selected) || opts[0];
+      const active = opts.find(o => o.selected) || opts.find(o => o.value === this.currentMenuType) || opts[0];
       toggleEl.textContent = active ? (active.textContent || '') : '';
     }
 
@@ -963,7 +964,7 @@ class ButtonConstructor {
         menuEl.appendChild(item);
       });
       
-      const active = opts.find(o => o.selected) || opts[0];
+      const active = opts.find(o => o.selected) || opts.find(o => o.value === this.currentMenuType) || opts[0];
       toggleEl.textContent = active ? (active.textContent || '') : '';
     }
 
@@ -1043,7 +1044,7 @@ class ButtonConstructor {
         menuEl.appendChild(item);
       });
       
-      const active = opts.find(o => o.selected) || opts[0];
+      const active = opts.find(o => o.selected) || opts.find(o => o.value === this.currentMenuType) || opts[0];
       toggleEl.textContent = active ? (active.textContent || '') : '';
     }
 
@@ -1095,8 +1096,13 @@ class ButtonConstructor {
     // Меню тип
     const menuTypeSelect = document.getElementById('menu-type-select');
     if (menuTypeSelect) {
+      // Set the saved menu type in the select
+      menuTypeSelect.value = this.currentMenuType;
+      
       menuTypeSelect.addEventListener('change', (e) => {
         this.currentMenuType = e.target.value;
+        // Save to localStorage
+        localStorage.setItem('buttonConstructorMenuType', this.currentMenuType);
         this.loadButtons();
         // НЕ обновляем предпросмотр автоматически при смене меню
         // Пользователь сам нажмет кнопку предпросмотра
@@ -1159,6 +1165,10 @@ class ButtonConstructor {
     if (actionType) {
       actionType.addEventListener('change', (e) => {
         this.toggleActionFields(e.target.value);
+        if (this.selectedButton) {
+          // Сохраняем изменения в базе данных
+          this.saveButtonProperties();
+        }
       });
     }
 
@@ -1167,6 +1177,8 @@ class ButtonConstructor {
     if (buttonWidth) {
       buttonWidth.addEventListener('change', (e) => {
         this.updateButtonWidthPreview(parseInt(e.target.value));
+        // Сохраняем изменения в базе данных
+        this.saveButtonProperties();
         // Обновляем предпросмотр после изменения ширины
         this.showPreview();
       });
@@ -1178,6 +1190,8 @@ class ButtonConstructor {
       buttonText.addEventListener('input', (e) => {
         if (this.selectedButton) {
           this.selectedButton.text = e.target.value;
+          // Сохраняем изменения в базе данных
+          this.saveButtonProperties();
           // Обновляем предпросмотр после изменения текста
           this.showPreview();
         }
@@ -1190,6 +1204,8 @@ class ButtonConstructor {
       callbackData.addEventListener('input', (e) => {
         if (this.selectedButton) {
           this.selectedButton.callback_data = e.target.value;
+          // Сохраняем изменения в базе данных
+          this.saveButtonProperties();
           // Обновляем предпросмотр после изменения callback
           this.showPreview();
         }
@@ -1202,8 +1218,58 @@ class ButtonConstructor {
       buttonUrl.addEventListener('input', (e) => {
         if (this.selectedButton) {
           this.selectedButton.url = e.target.value;
+          // Сохраняем изменения в базе данных
+          this.saveButtonProperties();
           // Обновляем предпросмотр после изменения URL
           this.showPreview();
+        }
+      });
+    }
+
+    // Позиция строки - обновляем в реальном времени
+    const rowPosition = document.getElementById('row-position');
+    if (rowPosition) {
+      rowPosition.addEventListener('change', (e) => {
+        if (this.selectedButton) {
+          this.selectedButton.row_position = parseInt(e.target.value);
+          // Сохраняем изменения в базе данных
+          this.saveButtonProperties();
+        }
+      });
+    }
+
+    // Позиция колонки - обновляем в реальном времени
+    const columnPosition = document.getElementById('column-position');
+    if (columnPosition) {
+      columnPosition.addEventListener('change', (e) => {
+        if (this.selectedButton) {
+          this.selectedButton.column_position = parseInt(e.target.value);
+          // Сохраняем изменения в базе данных
+          this.saveButtonProperties();
+        }
+      });
+    }
+
+    // Порядок сортировки - обновляем в реальном времени
+    const sortOrder = document.getElementById('sort-order');
+    if (sortOrder) {
+      sortOrder.addEventListener('change', (e) => {
+        if (this.selectedButton) {
+          this.selectedButton.sort_order = parseInt(e.target.value);
+          // Сохраняем изменения в базе данных
+          this.saveButtonProperties();
+        }
+      });
+    }
+
+    // Активность кнопки - обновляем в реальном времени
+    const isActive = document.getElementById('is-active');
+    if (isActive) {
+      isActive.addEventListener('change', (e) => {
+        if (this.selectedButton) {
+          this.selectedButton.is_active = e.target.checked ? 1 : 0;
+          // Сохраняем изменения в базе данных
+          this.saveButtonProperties();
         }
       });
     }
@@ -1438,6 +1504,9 @@ class ButtonConstructor {
     if (widthIndicator) {
       widthIndicator.textContent = `${newWidth}×`;
     }
+    
+    // Обновляем позиции всех кнопок в сетке
+    this.updateButtonPositions();
     
     console.log(`Updated button width preview: ${newWidth}`);
   }

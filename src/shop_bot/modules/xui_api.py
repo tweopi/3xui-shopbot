@@ -18,11 +18,11 @@ def login_to_host(host_url: str, username: str, password: str, inbound_id: int) 
         target_inbound = next((inbound for inbound in inbounds if inbound.id == inbound_id), None)
         
         if target_inbound is None:
-            logger.error(f"Inbound с ID '{inbound_id}' не найден на хосте '{host_url}'")
+            logger.error(f"Входящий трафик с ID '{inbound_id}' не найден на хосте '{host_url}'")
             return None, None
         return api, target_inbound
     except Exception as e:
-        logger.error(f"Не удалось выполнить вход или получить inbound для хоста '{host_url}': {e}", exc_info=True)
+        logger.error(f"Не удалось выполнить вход или получить входящий трафик для хоста '{host_url}': {e}", exc_info=True)
         return None, None
 
 def get_connection_string(inbound: Inbound, user_uuid: str, host_url: str, remark: str) -> str | None:

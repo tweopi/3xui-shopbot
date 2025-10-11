@@ -2069,7 +2069,7 @@ def get_admin_router() -> Router:
             host_resp = await create_or_update_key_on_host(host_name, generated_email, days_to_add=days)
         except Exception as e:
             host_resp = None
-            logging.error(f"Gift flow: failed to create client on host '{host_name}' for user {user_id}: {e}")
+            logging.error(f"Подарочный поток: не удалось создать клиента на хосте '{host_name}' для пользователя {user_id}: {e}")
 
         if not host_resp or not host_resp.get("client_uuid") or not host_resp.get("expiry_timestamp_ms"):
             await message.answer("❌ Не удалось выдать ключ на сервере. Проверьте настройки хоста и доступность панели XUI.")

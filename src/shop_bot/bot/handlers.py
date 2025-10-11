@@ -8,6 +8,7 @@ import aiohttp
 import json
 import base64
 import asyncio
+import hashlib
 
 from urllib.parse import urlencode
 from hmac import compare_digest
@@ -126,7 +127,7 @@ async def process_successful_onboarding(callback: types.CallbackQuery, state: FS
     try:
         set_terms_agreed(user_id)
     except Exception as e:
-        logger.error(f"Failed to set_terms_agreed for user {user_id}: {e}")
+        logger.error(f"Не удалось установить согласие с условиями для пользователя {user_id}: {e}")
     try:
         await callback.answer()
     except Exception:
@@ -194,9 +195,9 @@ def get_user_router() -> Router:
                 potential_referrer_id = int(command.args.split('_')[1])
                 if potential_referrer_id != user_id:
                     referrer_id = potential_referrer_id
-                    logger.info(f"New user {user_id} was referred by {referrer_id}")
+                    logger.info(f"Новый пользователь {user_id} был приглашен пользователем {referrer_id}")
             except (IndexError, ValueError):
-                logger.warning(f"Invalid referral code received: {command.args}")
+                logger.warning(f"Получен некорректный реферальный код: {command.args}")
                 
         register_user_if_not_exists(user_id, username, referrer_id)
         user_id = message.from_user.id
@@ -218,13 +219,13 @@ def get_user_router() -> Router:
                 try:
                     ok = add_to_balance(int(referrer_id), float(start_bonus))
                 except Exception as e:
-                    logger.warning(f"Referral start bonus: add_to_balance failed for referrer {referrer_id}: {e}")
+                    logger.warning(f"Реферальный стартовый бонус: не удалось добавить к балансу для реферера {referrer_id}: {e}")
                     ok = False
                 # Увеличиваем суммарный заработок по рефералке
                 try:
                     add_to_referral_balance_all(int(referrer_id), float(start_bonus))
                 except Exception as e:
-                    logger.warning(f"Referral start bonus: failed to increment referral_balance_all for {referrer_id}: {e}")
+                    logger.warning(f"Реферальный стартовый бонус: не удалось увеличить общий реферальный баланс для {referrer_id}: {e}")
                 # Помечаем, что для этого нового пользователя старт уже обработан, чтобы не дублировать при повторном /start
                 try:
                     set_referral_start_bonus_received(user_id)
@@ -558,7 +559,7 @@ def get_user_router() -> Router:
                 reply_markup=keyboards.create_payment_keyboard(payment.confirmation.confirmation_url)
             )
         except Exception as e:
-            logger.error(f"Failed to create YooKassa topup payment: {e}", exc_info=True)
+            logger.error(f"Не удалось создать платеж YooKassa для пополнения: {e}", exc_info=True)
             await callback.message.answer("Не удалось создать ссылку на оплату.")
             await state.clear()
 
@@ -588,7 +589,7 @@ def get_user_router() -> Router:
         try:
             create_pending_transaction(payment_id, user_id, float(amount), metadata)
         except Exception as e:
-            logger.warning(f"YooMoney topup: failed to create pending transaction: {e}")
+            logger.warning(f"YooMoney пополнение: не удалось создать ожидающую транзакцию: {e}")
         try:
             success_url = f"https://t.me/{TELEGRAM_BOT_USERNAME}" if TELEGRAM_BOT_USERNAME else None
         except Exception:
@@ -635,7 +636,7 @@ def get_user_router() -> Router:
         try:
             await process_successful_payment(bot, md)
         except Exception as e:
-            logger.error(f"YooMoney: process_successful_payment failed: {e}", exc_info=True)
+            logger.error(f"YooMoney: не удалось обработать успешный платеж: {e}", exc_info=True)
             try:
                 await callback.message.edit_text("❌ Ошибка при выдаче после оплаты. Напишите в поддержку.")
             except Exception:
@@ -664,7 +665,7 @@ def get_user_router() -> Router:
         try:
             create_pending_transaction(payment_id, callback.from_user.id, float(amount_rub), metadata)
         except Exception as e:
-            logger.warning(f"Stars topup: failed to create pending transaction: {e}")
+            logger.warning(f"Stars пополнение: не удалось создать ожидающую транзакцию: {e}")
         payload = payment_id
         title = (get_setting("stars_title") or "Пополнение баланса")
         description = (get_setting("stars_description") or f"Пополнение на {amount_rub} RUB")
@@ -679,7 +680,7 @@ def get_user_router() -> Router:
             )
             await state.clear()
         except Exception as e:
-            logger.error(f"Failed to send Stars topup invoice: {e}")
+            logger.error(f"Не удалось отправить счет Stars для пополнения: {e}")
             await callback.message.edit_text("❌ Не удалось создать счёт Stars. Попробуйте другой способ оплаты.")
             await state.clear()
             return
@@ -729,7 +730,7 @@ def get_user_router() -> Router:
                 await callback.message.edit_text("❌ Не удалось создать счёт. Попробуйте другой способ оплаты.")
                 await state.clear()
         except Exception as e:
-            logger.error(f"Failed to create topup invoice: {e}", exc_info=True)
+            logger.error(f"Не удалось создать счет для пополнения: {e}", exc_info=True)
             await callback.message.edit_text("❌ Не удалось создать счёт. Попробуйте другой способ оплаты.")
             await state.clear()
 
@@ -793,7 +794,7 @@ def get_user_router() -> Router:
             )
             await state.clear()
         except Exception as e:
-            logger.error(f"Failed to start TON Connect topup: {e}", exc_info=True)
+            logger.error(f"Не удалось запустить TON Connect для пополнения: {e}", exc_info=True)
             await callback.message.edit_text("❌ Не удалось подготовить оплату TON Connect.")
             await state.clear()
 
@@ -1044,7 +1045,7 @@ def get_user_router() -> Router:
                 if content:
                     await bot.send_message(chat_id=user_id, text=content)
         except Exception as e:
-            logger.warning(f"Failed to relay forum thread message: {e}")
+            logger.warning(f"Не удалось переслать сообщение из форумной темы: {e}")
 
     @user_router.callback_query(F.data.startswith("support_close_"))
     @registration_required
@@ -1195,7 +1196,7 @@ def get_user_router() -> Router:
                 await message.answer(text=final_text, reply_markup=keyboards.create_key_info_keyboard(new_key_id))
 
         except Exception as e:
-            logger.error(f"Error creating trial key for user {user_id} on host {host_name}: {e}", exc_info=True)
+            logger.error(f"Ошибка создания пробного ключа для пользователя {user_id} на хосте {host_name}: {e}", exc_info=True)
             await message.edit_text("❌ Произошла ошибка при создании пробного ключа.")
 
     @user_router.callback_query(F.data.startswith("show_key_"))
@@ -1230,7 +1231,7 @@ def get_user_router() -> Router:
                 reply_markup=keyboards.create_key_info_keyboard(key_id_to_show)
             )
         except Exception as e:
-            logger.error(f"Error showing key {key_id_to_show}: {e}")
+            logger.error(f"Ошибка показа ключа {key_id_to_show}: {e}")
             await callback.message.edit_text("❌ Произошла ошибка при получении данных ключа.")
 
     @user_router.callback_query(F.data.startswith("switch_server_"))
@@ -1349,7 +1350,7 @@ def get_user_router() -> Router:
                     reply_markup=keyboards.create_back_to_menu_keyboard()
                 )
         except Exception as e:
-            logger.error(f"Error switching key {key_id} to host {new_host_name}: {e}", exc_info=True)
+            logger.error(f"Ошибка переключения ключа {key_id} на хост {new_host_name}: {e}", exc_info=True)
             await callback.message.edit_text(
                 "❌ Произошла ошибка при переносе ключа. Попробуйте позже."
             )
@@ -1393,7 +1394,7 @@ def get_user_router() -> Router:
             qr_code_file = BufferedInputFile(bio.read(), filename="vpn_qr.png")
             await callback.message.answer_photo(photo=qr_code_file)
         except Exception as e:
-            logger.error(f"Error showing QR for key {key_id}: {e}")
+            logger.error(f"Ошибка показа QR-кода для ключа {key_id}: {e}")
 
     @user_router.callback_query(F.data.startswith("howto_vless_"))
     @registration_required
@@ -1734,7 +1735,7 @@ def get_user_router() -> Router:
 
             # Показываем опции оплаты с учетом балансов и цены
             await show_payment_options(message, state)
-            logger.info(f"User {message.chat.id}: State set to waiting_for_payment_method via show_payment_options")
+            logger.info(f"Пользователь {message.chat.id}: Состояние установлено в waiting_for_payment_method через show_payment_options")
         else:
             await message.answer("❌ Неверный формат email. Попробуйте еще раз.")
 
@@ -1745,7 +1746,7 @@ def get_user_router() -> Router:
 
         # Показываем опции оплаты с учетом балансов и цены
         await show_payment_options(callback.message, state)
-        logger.info(f"User {callback.from_user.id}: State set to waiting_for_payment_method via show_payment_options")
+        logger.info(f"Пользователь {callback.from_user.id}: Состояние установлено в waiting_for_payment_method через show_payment_options")
 
     async def show_payment_options(message: types.Message, state: FSMContext):
         data = await state.get_data()
@@ -2013,7 +2014,7 @@ def get_user_router() -> Router:
                 reply_markup=keyboards.create_payment_keyboard(payment.confirmation.confirmation_url)
             )
         except Exception as e:
-            logger.error(f"Failed to create YooKassa payment: {e}", exc_info=True)
+            logger.error(f"Не удалось создать платеж YooKassa: {e}", exc_info=True)
             await callback.message.answer("Не удалось создать ссылку на оплату.")
             await state.clear()
 
@@ -2080,7 +2081,7 @@ def get_user_router() -> Router:
         try:
             create_pending_transaction(payment_id, user_id, final_price_float, metadata)
         except Exception as e:
-            logger.warning(f"YooMoney: failed to create pending transaction: {e}")
+            logger.warning(f"YooMoney: не удалось создать ожидающую транзакцию: {e}")
 
         # Формируем ссылку QuickPay
         try:
@@ -2149,7 +2150,7 @@ def get_user_router() -> Router:
         try:
             create_pending_transaction(payment_id, callback.from_user.id, float(price_decimal), metadata)
         except Exception as e:
-            logger.warning(f"Stars purchase: failed to create pending transaction: {e}")
+            logger.warning(f"Stars покупка: не удалось создать ожидающую транзакцию: {e}")
         payload = payment_id
 
         title = (get_setting("stars_title") or "Покупка VPN")
@@ -2165,7 +2166,7 @@ def get_user_router() -> Router:
             )
             await state.clear()
         except Exception as e:
-            logger.error(f"Failed to send Stars invoice: {e}")
+            logger.error(f"Не удалось отправить счет Stars: {e}")
             await callback.message.edit_text("❌ Не удалось создать счёт Stars. Попробуйте другой способ оплаты.")
             await state.clear()
 
@@ -2185,14 +2186,14 @@ def get_user_router() -> Router:
 
         cryptobot_token = get_setting('cryptobot_token')
         if not cryptobot_token:
-            logger.error(f"Attempt to create Crypto Pay invoice failed for user {user_id}: cryptobot_token is not set.")
+            logger.error(f"Попытка создания счета Crypto Pay не удалась для пользователя {user_id}: cryptobot_token не установлен.")
             await callback.message.edit_text("❌ Оплата криптовалютой временно недоступна. (Администратор не указал токен).")
             await state.clear()
             return
 
         plan = get_plan_by_id(plan_id)
         if not plan:
-            logger.error(f"Attempt to create Crypto Pay invoice failed for user {user_id}: Plan with id {plan_id} not found.")
+            logger.error(f"Попытка создания счета Crypto Pay не удалась для пользователя {user_id}: План с id {plan_id} не найден.")
             await callback.message.edit_text("❌ Произошла ошибка при выборе тарифа.")
             await state.clear()
             return
@@ -2228,7 +2229,7 @@ def get_user_router() -> Router:
 
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_tonconnect")
     async def create_ton_invoice_handler(callback: types.CallbackQuery, state: FSMContext):
-        logger.info(f"User {callback.from_user.id}: Entered create_ton_invoice_handler.")
+        logger.info(f"Пользователь {callback.from_user.id}: Вход в create_ton_invoice_handler.")
         data = await state.get_data()
         user_id = callback.from_user.id
         wallet_address = get_setting("ton_wallet_address")
@@ -2299,7 +2300,7 @@ def get_user_router() -> Router:
             await state.clear()
 
         except Exception as e:
-            logger.error(f"Failed to generate TON Connect link for user {user_id}: {e}", exc_info=True)
+            logger.error(f"Не удалось сгенерировать ссылку TON Connect для пользователя {user_id}: {e}", exc_info=True)
             await callback.message.answer("❌ Не удалось создать ссылку для TON Connect. Попробуйте позже.")
             await state.clear()
 
@@ -2347,7 +2348,7 @@ def get_user_router() -> Router:
         try:
             await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
         except Exception as e:
-            logger.warning(f"pre_checkout_handler failed: {e}")
+            logger.warning(f"pre_checkout_handler не удался: {e}")
 
     # Сообщение об успешной оплате (в т.ч. Stars)
     @user_router.message(F.successful_payment)
@@ -2380,9 +2381,9 @@ def get_user_router() -> Router:
                     if md:
                         metadata = md
                 except Exception as e:
-                    logger.error(f"Failed to resolve pending transaction by payload '{payload}': {e}")
+                    logger.error(f"Не удалось разрешить ожидающую транзакцию по payload '{payload}': {e}")
         except Exception as e:
-            logger.error(f"Failed to parse successful_payment payload: {e}")
+            logger.error(f"Не удалось разобрать payload успешного платежа: {e}")
             metadata = {}
         if not metadata:
             try:
@@ -2631,7 +2632,7 @@ async def _start_ton_connect_process(user_id: int, transaction_payload: Dict) ->
         query = urlencode(params)
         return f"ton://transfer/{address}?{query}"
     except Exception as e:
-        logger.error(f"TON deep link generation failed: {e}")
+        logger.error(f"TON генерация deep link не удалась: {e}")
         # Фолбэк: без параметров
         return "ton://transfer"
 
@@ -2742,7 +2743,7 @@ async def notify_admin_of_purchase(bot: Bot, metadata: dict):
         )
         await bot.send_message(admin_id, text)
     except Exception as e:
-        logger.warning(f"notify_admin_of_purchase failed: {e}")
+        logger.warning(f"notify_admin_of_purchase не удался: {e}")
 
 async def process_successful_payment(bot: Bot, metadata: dict):
     try:
@@ -2761,21 +2762,21 @@ async def process_successful_payment(bot: Bot, metadata: dict):
         message_id_to_delete = metadata.get('message_id')
         
     except (ValueError, TypeError) as e:
-        logger.error(f"FATAL: Could not parse metadata. Error: {e}. Metadata: {metadata}")
+        logger.error(f"КРИТИЧЕСКАЯ ОШИБКА: Не удалось разобрать метаданные. Ошибка: {e}. Метаданные: {metadata}")
         return
 
     if chat_id_to_delete and message_id_to_delete:
         try:
             await bot.delete_message(chat_id=chat_id_to_delete, message_id=message_id_to_delete)
         except TelegramBadRequest as e:
-            logger.warning(f"Could not delete payment message: {e}")
+            logger.warning(f"Не удалось удалить сообщение о платеже: {e}")
 
     # Спец-ветка: пополнение баланса
     if action == "top_up":
         try:
             ok = add_to_balance(user_id, float(price))
         except Exception as e:
-            logger.error(f"Failed to add to balance for user {user_id}: {e}", exc_info=True)
+            logger.error(f"Не удалось добавить к балансу для пользователя {user_id}: {e}", exc_info=True)
             ok = False
         # Лог транзакции
         try:
