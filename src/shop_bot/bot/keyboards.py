@@ -948,12 +948,13 @@ def create_admin_hosts_pick_keyboard(hosts: list[dict], action: str = "gift") ->
     if hosts:
         for h in hosts:
             name = h.get('host_name')
+            title = name or "—"
             if action == "speedtest":
-                # Две кнопки в строке: запуск теста и автоустановка
-                builder.button(text=name, callback_data=f"admin_{action}_pick_host_{name}")
-                builder.button(text="🛠 Автоустановка", callback_data=f"admin_speedtest_autoinstall_{name}")
+                token = encode_host_callback_token(name or "")
+                builder.button(text=title, callback_data=f"admin_{action}_pick_host_{token}")
+                builder.button(text="🛠 Автоустановка", callback_data=f"admin_speedtest_autoinstall_{token}")
             else:
-                builder.button(text=name, callback_data=f"admin_{action}_pick_host_{name}")
+                builder.button(text=title, callback_data=f"admin_{action}_pick_host_{title}")
     else:
         builder.button(text="Хостов нет", callback_data="noop")
     # Дополнительные опции для speedtest

@@ -317,7 +317,13 @@ def get_admin_router() -> Router:
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
-        host_name = callback.data.replace("admin_speedtest_pick_host_", "", 1)
+        token = callback.data.replace("admin_speedtest_pick_host_", "", 1)
+        hosts = get_all_hosts() or []
+        host = keyboards.find_host_by_callback_token(hosts, token)
+        if not host:
+            await callback.message.answer("❌ Хост не найден или устарел список.")
+            return
+        host_name = host.get('host_name') or token
 
         # Уведомление всем администраторам о старте
         try:
@@ -530,7 +536,13 @@ def get_admin_router() -> Router:
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
-        host_name = callback.data.replace("admin_speedtest_autoinstall_", "", 1)
+        token = callback.data.replace("admin_speedtest_autoinstall_", "", 1)
+        hosts = get_all_hosts() or []
+        host = keyboards.find_host_by_callback_token(hosts, token)
+        if not host:
+            await callback.message.answer("❌ Хост не найден или устарел список.")
+            return
+        host_name = host.get('host_name') or token
         try:
             wait = await callback.message.answer(f"🛠 Пытаюсь установить speedtest на <b>{host_name}</b>…")
         except Exception:
